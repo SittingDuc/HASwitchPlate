@@ -26,23 +26,8 @@
 // OUT OF OR IN CONNECTION WITH THE PRODUCT OR THE USE OR OTHER DEALINGS IN THE PRODUCT.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-// OPTIONAL: Assign default values here.
-char wifiSSID[32] = ""; // Leave unset for wireless autoconfig. Note that these values will be lost
-char wifiPass[64] = ""; // when updating, but that's probably OK because they will be saved in EEPROM.
-
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// These defaults may be overwritten with values saved by the web interface
-char mqttServer[64] = "";
-char mqttPort[6] = "1883";
-char mqttUser[32] = "";
-char mqttPassword[32] = "";
-char haspNode[16] = "plate01";
-char groupName[16] = "plates";
-char configUser[32] = "admin";
-char configPassword[32] = "";
-char motionPinConfig[3] = "0";
-////////////////////////////////////////////////////////////////////////////////////////////////////
-
+#include "settings.h"
+#include <Arduino.h>
 #include <FS.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
@@ -58,6 +43,9 @@ char motionPinConfig[3] = "0";
 #include <MQTT.h>
 #include <EEPROM.h>
 #include <SoftwareSerial.h>
+
+// Settings now in a separate file
+// So we do not leave secrets here and upload to github accidentally
 
 const float haspVersion = 0.40;                     // Current HASP software release version
 byte nextionReturnBuffer[128];                      // Byte array to pass around data coming from the panel
@@ -81,7 +69,7 @@ bool debugTelnetEnabled = false;                    // Enable telnet debug outpu
 bool debugSerialD8Enabled = true;                   // Enable hardware serial debug output on pin D8
 const unsigned long telnetInputMax = 128;           // Size of user input buffer for user telnet session
 bool motionEnabled = false;                         // Motion sensor is enabled
-bool mdnsEnabled = true;                            // mDNS enabled
+bool mdnsEnabled = false;                            // mDNS enabled
 bool beepEnabled = false;                           // Keypress beep enabled
 unsigned long beepPrevMillis = 0;                   // will store last time beep was updated
 unsigned long beepOnTime = 1000;                    // milliseconds of on-time for beep
@@ -142,6 +130,18 @@ String espFirmwareUrl = "http://haswitchplate.com/update/HASwitchPlate.ino.d1_mi
 // Default link to compiled Nextion firmware images
 String lcdFirmwareUrl = "http://haswitchplate.com/update/HASwitchPlate.tft";
 
+const uint8_t maxCacheCount = 14;
+const uint16_t maxCacheSize = 2100; // 2047; // 18 of 3000 does crash = softloop. 13 of 2600 does too
+bool pageIsGlobal[maxCacheCount] = {false,};
+char* pageCache[maxCacheCount] = {NULL,};
+uint16_t pageCacheLen[maxCacheCount] = {0,};
+//static char hopeless[maxCacheSize] =  {'\0',};
+
+const bool debug_mqtt = false;
+const bool debug_hmi = false;
+
+
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void setup()
 { // System setup
@@ -153,8 +153,15 @@ void setup()
 
   debugPrintln(String(F("SYSTEM: Starting HASwitchPlate v")) + String(haspVersion));
   debugPrintln(String(F("SYSTEM: Last reset reason: ")) + String(ESP.getResetInfo()));
+  debugPrintln(String(F("SYSTEM: Heap Status: ")) + String(ESP.getFreeHeap()) + String(F(" ")) + String(ESP.getHeapFragmentation()) + String(F("%")) );
+  debugPrintln(String(F("SYSTEM: espCore: ")) + String(ESP.getCoreVersion()) );
 
-  configRead(); // Check filesystem for a saved config.json
+  for( int idx=0;idx<maxCacheCount;idx++){
+    pageCache[idx]=NULL; // null terminate each cache at power-on
+    pageCacheLen[idx]=0;
+  }
+
+  //configRead(); // Check filesystem for a saved config.json
 
   while (!lcdConnected && (millis() < 5000))
   { // Wait up to 5 seconds for serial input from LCD
@@ -171,6 +178,8 @@ void setup()
   }
 
   espWifiSetup(); // Start up networking
+
+  debugPrintln(String(F("SYSTEM: Heap Status: ")) + String(ESP.getFreeHeap()) + String(F(" ")) + String(ESP.getHeapFragmentation()) + String(F("%")) );
 
   if (mdnsEnabled)
   { // Setup mDNS service discovery if enabled
@@ -328,6 +337,8 @@ void loop()
     }
   }
 }
+
+
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Functions
@@ -488,7 +499,7 @@ void mqttCallback(String &strTopic, String &strPayload)
   // '[...]/device/command/p[1].b[4].txt' -m '' = nextionGetAttr("p[1].b[4].txt")
   // '[...]/device/command/p[1].b[4].txt' -m '"Lights On"' = nextionSetAttr("p[1].b[4].txt", "\"Lights On\"")
 
-  debugPrintln(String(F("MQTT IN: '")) + strTopic + "' : '" + strPayload + "'");
+  if( debug_mqtt ) { debugPrintln(String(F("MQTT IN: '")) + strTopic + "' : '" + strPayload + "'"); }
 
   if (((strTopic == mqttCommandTopic) || (strTopic == mqttGroupCommandTopic)) && (strPayload == ""))
   {                     // '[...]/device/command' -m '' = No command requested, respond with mqttStatusUpdate()
@@ -504,6 +515,22 @@ void mqttCallback(String &strTopic, String &strPayload)
     { // Hass likes to send duplicate responses to things like page requests and there are no plans to fix that behavior, so try and track it locally
       nextionActivePage = strPayload.toInt();
       nextionSendCmd("page " + strPayload);
+    }
+  }
+  else if (strTopic == (mqttCommandTopic + "/globalpage") || strTopic == (mqttGroupCommandTopic + "/globalpage"))
+  { // '[...]/device/command/globalpage' -m '1' sets pageIsGlobal flag
+    if( strPayload == "" ) {
+      // eh, what to do with an empty payload?
+    } else { // could tokenise with commas using subtring?
+      pageIsGlobal[strPayload.toInt()] = true;
+    }
+  }
+  else if (strTopic == (mqttCommandTopic + "/localpage") || strTopic == (mqttGroupCommandTopic + "/localpage"))
+  { // '[...]/device/command/globalpage' -m '1' sets pageIsGlobal flag
+    if( strPayload == "" ) {
+      // eh, what to do with an empty payload?
+    } else { // could tokenise with commas using subtring?
+      pageIsGlobal[strPayload.toInt()] = false;
     }
   }
   else if (strTopic == (mqttCommandTopic + "/json") || strTopic == (mqttGroupCommandTopic + "/json"))
@@ -649,6 +676,11 @@ void mqttStatusUpdate()
   mqttClient.publish(mqttStatusTopic, "ON", true, 1);
   debugPrintln(String(F("MQTT: status update: ")) + String(mqttStatusPayload));
   debugPrintln(String(F("MQTT: binary_sensor state: [")) + mqttStatusTopic + "] : [ON]");
+  debugPrintln(String(F("")));
+  for( int idx=0;idx<maxCacheCount;idx++) {
+    debugPrintln(String(F("debug [")) + idx + String(F("]=")) + pageCacheLen[idx] );
+  }
+  debugPrintln(String(F("")));
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -686,7 +718,7 @@ bool nextionHandleInput()
   }
   if (nextionCommandComplete)
   {
-    debugPrintln(hmiDebug);
+    if( debug_hmi ) { debugPrintln(hmiDebug); }
     hmiDebug = "HMI IN: ";
   }
   return nextionCommandComplete;
@@ -711,9 +743,9 @@ void nextionProcessInput()
 
     if (nextionButtonAction == 0x01)
     {
-      debugPrintln(String(F("HMI IN: [Button ON] 'p[")) + nextionPage + "].b[" + nextionButtonID + "]'");
+      if( debug_hmi ) {debugPrintln(String(F("HMI IN: [Button ON] 'p[")) + nextionPage + "].b[" + nextionButtonID + "]'");}
       String mqttButtonTopic = mqttStateTopic + "/p[" + nextionPage + "].b[" + nextionButtonID + "]";
-      debugPrintln(String(F("MQTT OUT: '")) + mqttButtonTopic + "' : 'ON'");
+      if( debug_mqtt ) { debugPrintln(String(F("MQTT OUT: '")) + mqttButtonTopic + "' : 'ON'"); }
       mqttClient.publish(mqttButtonTopic, "ON");
       String mqttButtonJSONEvent = String(F("{\"event\":\"p[")) + String(nextionPage) + String(F("].b[")) + String(nextionButtonID) + String(F("]\", \"value\":\"ON\"}"));
       mqttClient.publish(mqttStateJSONTopic, mqttButtonJSONEvent);
@@ -726,9 +758,9 @@ void nextionProcessInput()
     }
     if (nextionButtonAction == 0x00)
     {
-      debugPrintln(String(F("HMI IN: [Button OFF] 'p[")) + nextionPage + "].b[" + nextionButtonID + "]'");
+      if( debug_hmi ) {debugPrintln(String(F("HMI IN: [Button OFF] 'p[")) + nextionPage + "].b[" + nextionButtonID + "]'");}
       String mqttButtonTopic = mqttStateTopic + "/p[" + nextionPage + "].b[" + nextionButtonID + "]";
-      debugPrintln(String(F("MQTT OUT: '")) + mqttButtonTopic + "' : 'OFF'");
+      if( debug_mqtt ) { debugPrintln(String(F("MQTT OUT: '")) + mqttButtonTopic + "' : 'OFF'");}
       mqttClient.publish(mqttButtonTopic, "OFF");
       // Now see if this object has a .val that might have been updated.  Works for sliders,
       // two-state buttons, etc, throws a 0x1A error for normal buttons which we'll catch and ignore
@@ -743,13 +775,14 @@ void nextionProcessInput()
     // Example: 0x66 0x02 0xFF 0xFF 0xFF
     // Meaning: page 2
     String nextionPage = String(nextionReturnBuffer[1]);
-    debugPrintln(String(F("HMI IN: [sendme Page] '")) + nextionPage + "'");
+    if( debug_hmi ) {debugPrintln(String(F("HMI IN: [sendme Page] '")) + nextionPage + "'");}
     // if ((nextionActivePage != nextionPage.toInt()) && ((nextionPage != "0") || nextionReportPage0))
     if ((nextionPage != "0") || nextionReportPage0)
     { // If we have a new page AND ( (it's not "0") OR (we've set the flag to report 0 anyway) )
       nextionActivePage = nextionPage.toInt();
+      nextionReplayCmd();
       String mqttPageTopic = mqttStateTopic + "/page";
-      debugPrintln(String(F("MQTT OUT: '")) + mqttPageTopic + "' : '" + nextionPage + "'");
+      if( debug_mqtt ) { debugPrintln(String(F("MQTT OUT: '")) + mqttPageTopic + "' : '" + nextionPage + "'");}
       mqttClient.publish(mqttPageTopic, nextionPage);
     }
   }
@@ -767,16 +800,16 @@ void nextionProcessInput()
     byte nextionTouchAction = nextionReturnBuffer[5];
     if (nextionTouchAction == 0x01)
     {
-      debugPrintln(String(F("HMI IN: [Touch ON] '")) + xyCoord + "'");
+      if( debug_hmi ) {debugPrintln(String(F("HMI IN: [Touch ON] '")) + xyCoord + "'");}
       String mqttTouchTopic = mqttStateTopic + "/touchOn";
-      debugPrintln(String(F("MQTT OUT: '")) + mqttTouchTopic + "' : '" + xyCoord + "'");
+      if( debug_mqtt ) { debugPrintln(String(F("MQTT OUT: '")) + mqttTouchTopic + "' : '" + xyCoord + "'");}
       mqttClient.publish(mqttTouchTopic, xyCoord);
     }
     else if (nextionTouchAction == 0x00)
     {
-      debugPrintln(String(F("HMI IN: [Touch OFF] '")) + xyCoord + "'");
+      if( debug_hmi ) {debugPrintln(String(F("HMI IN: [Touch OFF] '")) + xyCoord + "'");}
       String mqttTouchTopic = mqttStateTopic + "/touchOff";
-      debugPrintln(String(F("MQTT OUT: '")) + mqttTouchTopic + "' : '" + xyCoord + "'");
+      if( debug_mqtt ) { debugPrintln(String(F("MQTT OUT: '")) + mqttTouchTopic + "' : '" + xyCoord + "'");}
       mqttClient.publish(mqttTouchTopic, xyCoord);
     }
   }
@@ -790,16 +823,16 @@ void nextionProcessInput()
     { // convert the payload into a string
       getString += (char)nextionReturnBuffer[i];
     }
-    debugPrintln(String(F("HMI IN: [String Return] '")) + getString + "'");
+    if( debug_hmi ) {debugPrintln(String(F("HMI IN: [String Return] '")) + getString + "'");}
     if (mqttGetSubtopic == "")
     { // If there's no outstanding request for a value, publish to mqttStateTopic
-      debugPrintln(String(F("MQTT OUT: '")) + mqttStateTopic + "' : '" + getString + "]");
+      if( debug_mqtt ) { debugPrintln(String(F("MQTT OUT: '")) + mqttStateTopic + "' : '" + getString + "]");}
       mqttClient.publish(mqttStateTopic, getString);
     }
     else
     { // Otherwise, publish the to saved mqttGetSubtopic and then reset mqttGetSubtopic
       String mqttReturnTopic = mqttStateTopic + mqttGetSubtopic;
-      debugPrintln(String(F("MQTT OUT: '")) + mqttReturnTopic + "' : '" + getString + "]");
+      if( debug_mqtt ) { debugPrintln(String(F("MQTT OUT: '")) + mqttReturnTopic + "' : '" + getString + "]");}
       mqttClient.publish(mqttReturnTopic, getString);
       mqttGetSubtopic = "";
     }
@@ -814,13 +847,13 @@ void nextionProcessInput()
     getInt = getInt * 256 + nextionReturnBuffer[2];
     getInt = getInt * 256 + nextionReturnBuffer[1];
     String getString = String(getInt);
-    debugPrintln(String(F("HMI IN: [Int Return] '")) + getString + "'");
+    if( debug_hmi ) {debugPrintln(String(F("HMI IN: [Int Return] '")) + getString + "'");}
 
     if (lcdVersionQueryFlag)
     {
       lcdVersion = getInt;
       lcdVersionQueryFlag = false;
-      debugPrintln(String(F("HMI IN: lcdVersion '")) + String(lcdVersion) + "'");
+      if( debug_hmi ) {debugPrintln(String(F("HMI IN: lcdVersion '")) + String(lcdVersion) + "'");}
     }
     else if (mqttGetSubtopic == "")
     {
@@ -849,7 +882,7 @@ void nextionProcessInput()
         if (comokFieldCount == 2)
         {
           nextionModel = comokField;
-          debugPrintln(String(F("HMI IN: nextionModel: ")) + nextionModel);
+          if( debug_hmi ) {debugPrintln(String(F("HMI IN: nextionModel: ")) + nextionModel);}
         }
         comokFieldCount++;
         comokField = "";
@@ -872,14 +905,155 @@ void nextionProcessInput()
   nextionReturnIndex = 0; // Done handling the buffer, reset index back to 0
 }
 
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+static void _nextionSendCmd(String nextionCmd)
+{ // Send a raw command to the Nextion panel
+  Serial1.print(nextionCmd);
+  Serial1.write(nextionSuffix, sizeof(nextionSuffix));
+  if( debug_hmi ) {debugPrintln(String(F("HMI OUT: ")) + nextionCmd);}
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void nextionReplayCmd(void)
+{
+//  debugPrintln(String(F("--- Entry Point Replay Cmd ")) + nextionActivePage);
+//  if( 1 == nextionActivePage) {
+//    debugPrintln(String(F("--- Contents  ")) + pageCache[nextionActivePage]);
+//  }
+  if( nextionActivePage >= maxCacheCount ) {
+    debugPrintln(String(F("Cache cannot replay for high-order page: ")) + nextionActivePage );
+    return;
+  }
+  // Do nothing if the cache is empty
+  if( pageCache[nextionActivePage] == NULL ) {
+    return;
+  }
+  // Do something if the cache is not.
+  //StaticJsonDocument<maxCacheSize> replayCommands;
+  DynamicJsonDocument replayCommands(maxCacheSize);
+  DeserializationError jsonError = deserializeJson(replayCommands, pageCache[nextionActivePage]);
+  if (jsonError)
+  { // Couldn't parse incoming JSON command
+    debugPrintln(String(F("HMI: [ERROR] Failed to replay cache on page change. Reported error: ")) + String(jsonError.c_str()));
+  }
+  else
+  {
+    // we saved ram by not storing the p[x]. text, so re-add it here
+    // can we do this with printf?
+    String preface=String("p[") + nextionActivePage + String("].");
+    JsonObject replayObj = replayCommands.as<JsonObject>();
+    //JsonArray replayArray = replayCommands.as<JsonArray>();
+//    if( 1 == nextionActivePage ) {
+//      debugPrintln(String(F("--- ah wea  ")) + replayCommands.size() + "  " + replayObj.size() + "  " + preface);
+//    }
+    for (JsonPair keyValue : replayObj) {
+      //String subsequent = replayCommands[idx];
+      String thiskey=keyValue.key().c_str();
+      String thisvalue=keyValue.value().as<char*>();
+      String resultant = preface + thiskey + "=" + thisvalue;
+//      debugPrintln(String(F("HMI:  ")) + " " + resultant); // _nextionSendCmd has a printf itself
+      _nextionSendCmd(resultant);
+      delayMicroseconds(200); // Larger JSON objects can take a while to run through over serial,
+    }                         // give the ESP and Nextion a moment to deal with life
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void appendCmd(int page, String nextionCmd)
+{
+//  debugPrintln(String(F("aCmd ")) + page + "  " + nextionCmd);
+  // our input is like p[1].b[1].txt="Hello World"
+  // or p[20].b[13].pco=65535
+  // we save ram by not storing the page number text
+
+  if( page >= maxCacheCount ) {
+    debugPrintln(String(F("Cache not stored for high-order page: ")) + page );
+    return;
+  }
+
+  String object=getSubtringField(nextionCmd,'=',0);
+  String value=getSubtringField(nextionCmd,'=',1);
+
+  int nom = 0;
+  char buffer[maxCacheSize];
+
+  if( nextionCmd.charAt(4)==']' ) { // page 10-99
+    nom=6;
+  } else { // page 0-9
+    nom=5;
+  }
+  String pageFree =object.substring(nom);
+
+//  debugPrintln(String(F("--- debug ---  ")) + pageFree + "   " + value);
+
+  // In the pageCache[page], find pageFree entry and if it exists, replace it with pageFree+"="+value. If it does not exist, add it.
+  //StaticJsonDocument<maxCacheSize> cacheCommands;
+  DynamicJsonDocument cacheCommands(maxCacheSize);
+  if( pageCache[page] != NULL) {
+    DeserializationError jsonError = deserializeJson(cacheCommands, pageCache[page]);
+    if (jsonError)
+    { // Couldn't parse incoming JSON command
+      debugPrintln(String(F("Internal: [ERROR] Failed to update cache. Reported error: ")) + String(jsonError.c_str()));
+      debugPrintln(String(F("Internal: [DEBUG] Input String was: >>")) + nextionCmd + String(F("<<, cache was >>")) + pageCache[page] + String(F("<<")));
+      //
+      if( pageCache[page] != NULL ) { // fragment memory!
+        free(pageCache[page]);
+        pageCache[page]=NULL;
+        pageCacheLen[page]=0;
+      }
+      return;
+    }
+  }
+  cacheCommands[pageFree]=value;
+  int count=serializeJson(cacheCommands, buffer, maxCacheSize-1);
+  buffer[maxCacheSize-1]='\0'; // force null termination
+  int buflen=strlen(buffer);
+
+  if( count > 0 && buflen > pageCacheLen[page] ) { // including when pageCacheLen[page]==0
+    if( pageCache[page] == NULL ) { // new malloc
+      pageCache[page]=(char*)malloc( sizeof(char) * (buflen+1) );
+      if(pageCache[page] == NULL) { // oops
+        pageCacheLen[page]=0;
+        debugPrintln(String(F("Internal: [ERROR] Failed to malloc cache, wanted "))+buflen);
+        return;
+      }
+    } else { // realloc
+      pageCache[page]=(char*)realloc((void*)pageCache[page], sizeof(char) * (buflen+1));
+      if(pageCache[page] == NULL) { // oops
+        pageCacheLen[page]=0;
+        debugPrintln(String(F("Internal: [ERROR] Failed to realloc cache, was ")) + pageCacheLen[page]);
+        return;
+      }
+    }
+    pageCacheLen[page]=buflen+1;
+  }
+
+  if( count > 0 ) {
+    strncpy(pageCache[page],buffer,buflen);
+    pageCache[page][buflen]='\0'; // paranoia, force null termination
+  }
+
+  if( page == 1 ) {
+//    debugPrintln(String(F("---  ")) + pageCache[page]);
+  debugPrintln(String(F("SYSTEM: Heap Status: ")) + String(ESP.getFreeHeap()) + String(F(" ")) + String(ESP.getHeapFragmentation()) + String(F("%")) );
+  }
+  // and garbage collect
+  //cacheCommands.clear();
+}
+
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void nextionSetAttr(String hmiAttribute, String hmiValue)
 { // Set the value of a Nextion component attribute
+  nextionSendCmd(hmiAttribute + "=" + hmiValue);
+  /*
   Serial1.print(hmiAttribute);
   Serial1.print("=");
   Serial1.print(hmiValue);
   Serial1.write(nextionSuffix, sizeof(nextionSuffix));
   debugPrintln(String(F("HMI OUT: '")) + hmiAttribute + "=" + hmiValue + "'");
+  */
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -889,15 +1063,34 @@ void nextionGetAttr(String hmiAttribute)
   // return of that value will be handled by nextionProcessInput and placed into mqttGetSubtopic
   Serial1.print("get " + hmiAttribute);
   Serial1.write(nextionSuffix, sizeof(nextionSuffix));
-  debugPrintln(String(F("HMI OUT: 'get ")) + hmiAttribute + "'");
+  if( debug_hmi ) {debugPrintln(String(F("HMI OUT: 'get ")) + hmiAttribute + "'");}
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void nextionSendCmd(String nextionCmd)
-{ // Send a raw command to the Nextion panel
-  Serial1.print(nextionCmd);
-  Serial1.write(nextionSuffix, sizeof(nextionSuffix));
-  debugPrintln(String(F("HMI OUT: ")) + nextionCmd);
+{ // maybe send a commmand to the panel
+  // p[1].b[1].text="Hello World"
+  if( nextionCmd.startsWith("p[") && (nextionCmd.charAt(3)==']' || nextionCmd.charAt(4)==']')) {
+    int tgtPage;
+    // who wants to bet there is a cleaner way to turn p[0] to p[99] into integer 0 to 99?
+    if(nextionCmd.charAt(3)==']') {  tgtPage=(nextionCmd.charAt(2)-'0');
+    } else {  tgtPage=((nextionCmd.charAt(2)-'0')*10) + (nextionCmd.charAt(3)-'0');
+    }
+
+    // Always add the entry to the list
+    appendCmd(tgtPage,nextionCmd);
+
+    // but only render it if the page is active, or the page is global
+    if (tgtPage == nextionActivePage || pageIsGlobal[tgtPage]) {
+      _nextionSendCmd(nextionCmd);
+    } // else {
+      //debugPrintln(String(F("HMI Skip: ")) + nextionCmd);
+    //}
+
+  } else {
+    // not a button / attribute, send it through
+    _nextionSendCmd(nextionCmd);
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -917,14 +1110,15 @@ void nextionParseJson(String &strPayload)
   }
   else
   {
-    deserializeJson(nextionCommands, strPayload);
     for (uint8_t i = 0; i < nextionCommands.size(); i++)
     {
       nextionSendCmd(nextionCommands[i]);
-      delayMicroseconds(500); // Larger JSON objects can take a while to run through over serial,
+      delayMicroseconds(200); // Larger JSON objects can take a while to run through over serial,
     }                         // give the ESP and Nextion a moment to deal with life
   }
 }
+
+
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void nextionStartOtaDownload(String otaUrl)
@@ -2420,6 +2614,11 @@ void webHandleReboot()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool updateCheck()
 { // firmware update check
+  // Gerard has placed nodes on an isolated network. Connecting to the live internet is verboten and unpossible. So skip the pointless check
+  updateEspAvailable = false;
+  updateLcdAvailable = false;
+  return true;
+/*
   HTTPClient updateClient;
   debugPrintln(String(F("UPDATE: Checking update URL: ")) + String(UPDATE_URL));
   String updatePayload;
@@ -2474,6 +2673,7 @@ bool updateCheck()
     }
     debugPrintln(F("UPDATE: Update check completed"));
   }
+  */
   return true;
 }
 
