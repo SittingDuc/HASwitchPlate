@@ -140,7 +140,58 @@ uint16_t pageCacheLen[maxCacheCount] = {0,};
 const bool debug_mqtt = false;
 const bool debug_hmi = false;
 
+////////////////////////////////////////////////////////////////////////////////////////////////////
 
+String getSubtringField(String data, char separator, int index);
+String printHex8(String data, uint8_t length);
+void nextionConnect();
+void nextionSetSpeed();
+void nextionReset();
+bool nextionHandleInput();
+void nextionProcessInput();
+
+void nextionStartOtaDownload(String otaUrl);
+bool nextionOtaResponse();
+void nextionSetAttr(String hmiAttribute, String hmiValue);
+void nextionGetAttr(String hmiAttribute);
+void nextionSendCmd(String nextionCmd);
+void nextionParseJson(String &strPayload);;
+void nextionReplayCmd(void);
+void appendCmd(int page, String nextionCmd);
+void espReset();
+void configRead();
+void mqttStatusUpdate();
+void mqttCallback(String &strTopic, String &strPayload);
+void espWifiSetup();
+void espWifiReconnect();
+void espWifiConfigCallback(WiFiManager *myWiFiManager);
+void espSetupOta();
+void espStartOta(String espOtaUrl);
+void configSaveCallback();
+void configSave();
+void mqttConnect();
+void configClearSaved();
+void webHandleNotFound();
+void webHandleRoot();
+void webHandleSaveConfig();
+void webHandleResetConfig();
+void webHandleResetBacklight();
+void webHandleFirmware();
+void webHandleEspFirmware();
+void webHandleLcdUpload();
+void webHandleLcdUpdateSuccess();
+void webHandleLcdUpdateFailure();
+void webHandleLcdDownload();
+void webHandleTftFileSize();
+void webHandleReboot();
+bool updateCheck();
+void motionSetup();
+void motionUpdate();
+void handleTelnetClient();
+void debugPrintln(String debugText);
+void debugPrint(String debugText);
+
+static void _nextionSendCmd(String nextionCmd);
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void setup()
