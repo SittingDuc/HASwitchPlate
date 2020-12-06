@@ -35,21 +35,25 @@ class debugClass {
 
     // called on setup to initialise all our things
     void begin(void) {
-        verboseDebugHMI=true;
-        verboseDebugMQTT=true;
+        verboseDebugHMI=DEBUG_HMI_VERBOSE;
+        verboseDebugMQTT=DEBUG_MQTT_VERBOSE;
         verboseDebugSystem=true;
         verboseDebugWiFi=true;
-        telnetEnabled=false; // que?
-        serialEnabled=false; // que?
+        telnetEnabled=DEBUG_TELNET_ENABLED;
+        serialEnabled=DEBUG_SERIAL_ENABLED;
         _alive=true;
     }
 
     inline void enableSerial(bool enable=true) { serialEnabled=enable; }
     inline void disableSerial(bool enable=false) { serialEnabled=enable; }
     inline void enableTelnet(bool enable=true) { telnetEnabled=enable; }
-    inline void disableTelent(bool enable=false) { telnetEnabled=enable; }
+    inline void disableTelnet(bool enable=false) { telnetEnabled=enable; }
 
-    
+    bool getSerialEnabled() { return serialEnabled; }
+    bool getTelnetEnabled() { return telnetEnabled; }
+
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////
     void printLn(String debugText) {
         // Debug output line of text to our debug targets
         String debugTimeText = "[+" + String(float(millis()) / 1000, 3) + "s] " + debugText;
@@ -87,6 +91,7 @@ class debugClass {
         }
     }
 
+    ////////////////////////////////////////////////////////////////////////////////////////////////////
     inline void printLn( enum source_t source, String debugText ) {
         if( source == HMI && verboseDebugHMI) { printLn(debugText); }
         if( source == MQTT && verboseDebugMQTT) { printLn(debugText); }
@@ -107,6 +112,7 @@ class debugClass {
         if( verboseDebugWiFi ) { printLn(debugText); }
     }
 
+    ////////////////////////////////////////////////////////////////////////////////////////////////////
     void verbosity( enum source_t source, bool verbose=false)
     {
         if( source == HMI) { verboseDebugHMI=verbose; }

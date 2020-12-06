@@ -82,13 +82,14 @@ class hmiNextionClass {
         _alive=true;
         startupCompleteFlag=false;
         CheckTimer=0;
-        RetryMax = 5;
+        RetryMax = NEXTION_RETRY_MAX;
         _lcdConnected=false;
         lcdVersionQueryFlag = false;
         lcdVersion = 0;
         ReturnIndex = 0;
         ActivePage = 0;
-        ReportPage0 = false;
+        ReportPage0 = NEXTION_REPORT_PAGE0;
+
         // setting the cache up goes here too
         for( int idx=0;idx<maxCacheCount;idx++){
           pageCache[idx]=NULL; // null terminate each cache at power-on
@@ -138,11 +139,6 @@ class hmiNextionClass {
 
     }
 
-    // we may find use from a callback
-    void callback(void) {
-        
-    }
-
     ////////////////////////////////////////////////////////////////////////////////////////////////////
     void Connect()
     {
@@ -183,7 +179,7 @@ class hmiNextionClass {
     {
       debug.printLn(F("HMI: Rebooting LCD"));
       digitalWrite(nextionResetPin, LOW);
-      Serial1.print("rest");
+      Serial1.print("rest"); // yes "rest", not "reset"
       Serial1.write(Suffix, sizeof(Suffix));
       Serial1.flush();
       delay(100);
@@ -863,6 +859,8 @@ class hmiNextionClass {
     void setPageGlobal( uint8_t page, bool newFlag ) {
       if( page < maxCacheCount ) {
         pageIsGlobal[page] = newFlag;
+      } else {
+        debug.printLn(HMI,String(F("Cache cannot be global for high-order page: ")) + page );
       }
     }
 
@@ -871,10 +869,14 @@ class hmiNextionClass {
       return _lcdConnected;
     }
 
+    unsigned long getLCDVersion() {
+      return lcdVersion;
+    }
+
 
   protected:
     //;
-    const unsigned long CheckInterval = 5000;        // Time in msec between nextion connection checks
+    const unsigned long CheckInterval = NEXTION_CHECK_INTERVAL;        // Time in msec between nextion connection checks
     const String lcdVersionQuery = "p[0].b[2].val";  // Object ID for lcdVersion in HMI
     
     bool _alive;

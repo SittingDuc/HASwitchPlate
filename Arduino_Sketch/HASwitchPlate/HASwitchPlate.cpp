@@ -49,18 +49,16 @@
 // Settings now in a separate file
 // So we do not leave secrets here and upload to github accidentally
 
-const float haspVersion = 0.40;                     // Current HASP software release version
-const char wifiConfigPass[9] = "hasplate";          // First-time config WPA2 password
-const char wifiConfigAP[14] = "HASwitchPlate";      // First-time config SSID
-bool shouldSaveConfig = false;                      // Flag to save json config to SPIFFS
-bool nextionReportPage0 = false;                    // If false, don't report page 0 sendme
+const float haspVersion = HASP_VERSION;              // Current HASP software release version
+const char wifiConfigPass[9] = WIFI_CONFIG_PASSWORD; // First-time config WPA2 password
+const char wifiConfigAP[14] = WIFI_CONFIG_AP;        // First-time config SSID
+bool shouldSaveConfig = false;                       // Flag to save json config to SPIFFS
+bool nextionReportPage0 = NEXTION_REPORT_PAGE0;      // If false, don't report page 0 sendme
 const unsigned long updateCheckInterval = 43200000; // Time in msec between update checks (12 hours)
 unsigned long updateCheckTimer = 0;                 // Timer for update check
 bool updateEspAvailable = false;                    // Flag for update check to report new ESP FW version
 float updateEspAvailableVersion;                    // Float to hold the new ESP FW version number
 bool updateLcdAvailable = false;                    // Flag for update check to report new LCD FW version
-bool debugSerialEnabled = true;                     // Enable USB serial debug output
-bool debugTelnetEnabled = false;                    // Enable telnet debug output
 bool debugSerialD8Enabled = true;                   // Enable hardware serial debug output on pin D8
 const unsigned long telnetInputMax = 128;           // Size of user input buffer for user telnet session
 bool motionEnabled = false;                         // Motion sensor is enabled
@@ -76,16 +74,13 @@ uint8_t motionPin = 0;                              // GPIO input pin for motion
 bool motionActive = false;                          // Motion is being detected
 const unsigned long motionLatchTimeout = 30000;     // Latch time for motion sensor
 const unsigned long motionBufferTimeout = 1000;     // Latch time for motion sensor
-unsigned long lcdVersion = 0;                       // Int to hold current LCD FW version number
 unsigned long updateLcdAvailableVersion;            // Int to hold the new LCD FW version number
-bool lcdVersionQueryFlag = false;                   // Flag to set if we've queried lcdVersion
-const String lcdVersionQuery = "p[0].b[2].val";     // Object ID for lcdVersion in HMI
 const long statusUpdateInterval = 300000;           // Time in msec between publishing MQTT status updates (5 minutes)
 long statusUpdateTimer = 0;                         // Timer for update check
-const unsigned long connectTimeout = 300;           // Timeout for WiFi and MQTT connection attempts in seconds
-const unsigned long reConnectTimeout = 15;          // Timeout for WiFi reconnection attempts in seconds
+const unsigned long connectTimeout = CONNECTION_TIMEOUT; // Timeout for WiFi and MQTT connection attempts in seconds
+const unsigned long reConnectTimeout = RECONNECT_TIMEOUT; // Timeout for WiFi reconnection attempts in seconds
 byte espMac[6];                                     // Byte array to store our MAC address
-const uint16_t mqttMaxPacketSize = 4096;            // Size of buffer for incoming MQTT message
+const uint16_t mqttMaxPacketSize = MQTT_MAX_PACKET_SIZE; // Size of buffer for incoming MQTT message
 String mqttClientId;                                // Auto-generated MQTT ClientID
 String mqttGetSubtopic;                             // MQTT subtopic for incoming commands requesting .val
 String mqttGetSubtopicJSON;                         // MQTT object buffer for JSON status when requesting .val
@@ -196,7 +191,7 @@ void setup()
   if (mdnsEnabled)
   { // Setup mDNS service discovery if enabled
     hMDNSService = MDNS.addService(haspNode, "http", "tcp", 80);
-    if (debugTelnetEnabled)
+    if (debug.getTelnetEnabled())
     {
       MDNS.addService(haspNode, "telnet", "tcp", 23);
     }
@@ -243,7 +238,7 @@ void setup()
     pinMode(beepPin, OUTPUT);
   }
 
-  if (debugTelnetEnabled)
+  if (debug.getTelnetEnabled())
   { // Setup telnet server for remote debug output
     telnetServer.setNoDelay(true);
     telnetServer.begin();
@@ -302,7 +297,7 @@ void loop()
     motionUpdate();
   }
 
-  if (debugTelnetEnabled)
+  if (debug.getTelnetEnabled())
   {
     handleTelnetClient(); // telnetClient loop
   }
@@ -641,7 +636,7 @@ void mqttStatusUpdate()
   {
     mqttStatusPayload += String(F("\"lcdConnected\":false,"));
   }
-  mqttStatusPayload += String(F("\"lcdVersion\":\"")) + String(lcdVersion) + String(F("\","));
+  mqttStatusPayload += String(F("\"lcdVersion\":\"")) + String(nextion.getLCDVersion()) + String(F("\","));
   if (updateLcdAvailable)
   {
     mqttStatusPayload += String(F("\"updateLcdAvailable\":true,"));
@@ -947,22 +942,22 @@ void configRead()
           {
             if (configJson["debugSerialEnabled"])
             {
-              debugSerialEnabled = true;
+              debug.enableSerial(true);
             }
             else
             {
-              debugSerialEnabled = false;
+              debug.enableSerial(false);
             }
           }
           if (!configJson["debugTelnetEnabled"].isNull())
           {
             if (configJson["debugTelnetEnabled"])
             {
-              debugTelnetEnabled = true;
+              debug.enableTelnet(true);
             }
             else
             {
-              debugTelnetEnabled = false;
+              debug.enableTelnet(false);
             }
           }
           if (!configJson["mdnsEnabled"].isNull())
@@ -1030,8 +1025,8 @@ void configSave()
   jsonConfigValues["configUser"] = configUser;
   jsonConfigValues["configPassword"] = configPassword;
   jsonConfigValues["motionPinConfig"] = motionPinConfig;
-  jsonConfigValues["debugSerialEnabled"] = debugSerialEnabled;
-  jsonConfigValues["debugTelnetEnabled"] = debugTelnetEnabled;
+  jsonConfigValues["debugSerialEnabled"] = debug.getSerialEnabled();
+  jsonConfigValues["debugTelnetEnabled"] = debug.getTelnetEnabled();
   jsonConfigValues["mdnsEnabled"] = mdnsEnabled;
   jsonConfigValues["beepEnabled"] = beepEnabled;
 
@@ -1044,8 +1039,8 @@ void configSave()
   debug.printLn(String(F("SPIFFS: configUser = ")) + String(configUser));
   debug.printLn(String(F("SPIFFS: configPassword = ")) + String(configPassword));
   debug.printLn(String(F("SPIFFS: motionPinConfig = ")) + String(motionPinConfig));
-  debug.printLn(String(F("SPIFFS: debugSerialEnabled = ")) + String(debugSerialEnabled));
-  debug.printLn(String(F("SPIFFS: debugTelnetEnabled = ")) + String(debugTelnetEnabled));
+  debug.printLn(String(F("SPIFFS: debugSerialEnabled = ")) + String(debug.getSerialEnabled()));
+  debug.printLn(String(F("SPIFFS: debugTelnetEnabled = ")) + String(debug.getTelnetEnabled()));
   debug.printLn(String(F("SPIFFS: mdnsEnabled = ")) + String(mdnsEnabled));
   debug.printLn(String(F("SPIFFS: beepEnabled = ")) + String(beepEnabled));
 
@@ -1162,12 +1157,12 @@ void webHandleRoot()
   httpMessage += String(F(">D1</option></select>"));
 
   httpMessage += String(F("<br/><b>Serial debug output enabled:</b><input id='debugSerialEnabled' name='debugSerialEnabled' type='checkbox'"));
-  if (debugSerialEnabled)
+  if (debug.getSerialEnabled())
   {
     httpMessage += String(F(" checked='checked'"));
   }
   httpMessage += String(F("><br/><b>Telnet debug output enabled:</b><input id='debugTelnetEnabled' name='debugTelnetEnabled' type='checkbox'"));
-  if (debugTelnetEnabled)
+  if (debug.getTelnetEnabled())
   {
     httpMessage += String(F(" checked='checked'"));
   }
@@ -1217,7 +1212,7 @@ void webHandleRoot()
   httpMessage += String(F("<br/><b>MQTT ClientID: </b>")) + String(mqttClientId);
   httpMessage += String(F("<br/><b>HASP Version: </b>")) + String(haspVersion);
   httpMessage += String(F("<br/><b>LCD Model: </b>")) + String(nextion.getModel());
-  httpMessage += String(F("<br/><b>LCD Version: </b>")) + String(lcdVersion);
+  httpMessage += String(F("<br/><b>LCD Version: </b>")) + String(nextion.getLCDVersion());
   httpMessage += String(F("<br/><b>LCD Active Page: </b>")) + String(nextion.getActivePage());
   httpMessage += String(F("<br/><b>CPU Frequency: </b>")) + String(ESP.getCpuFreqMHz()) + String(F("MHz"));
   httpMessage += String(F("<br/><b>Sketch Size: </b>")) + String(ESP.getSketchSize()) + String(F(" bytes"));
@@ -1311,25 +1306,25 @@ void webHandleSaveConfig()
     shouldSaveConfig = true;
     webServer.arg("motionPinConfig").toCharArray(motionPinConfig, 3);
   }
-  if ((webServer.arg("debugSerialEnabled") == String("on")) && !debugSerialEnabled)
+  if ((webServer.arg("debugSerialEnabled") == String("on")) && !debug.getSerialEnabled())
   { // debugSerialEnabled was disabled but should now be enabled
     shouldSaveConfig = true;
-    debugSerialEnabled = true;
+    debug.enableSerial(true);
   }
-  else if ((webServer.arg("debugSerialEnabled") == String("")) && debugSerialEnabled)
+  else if ((webServer.arg("debugSerialEnabled") == String("")) && debug.getSerialEnabled())
   { // debugSerialEnabled was enabled but should now be disabled
     shouldSaveConfig = true;
-    debugSerialEnabled = false;
+    debug.enableSerial(false);
   }
-  if ((webServer.arg("debugTelnetEnabled") == String("on")) && !debugTelnetEnabled)
+  if ((webServer.arg("debugTelnetEnabled") == String("on")) && !debug.getTelnetEnabled())
   { // debugTelnetEnabled was disabled but should now be enabled
     shouldSaveConfig = true;
-    debugTelnetEnabled = true;
+    debug.enableTelnet(true);
   }
-  else if ((webServer.arg("debugTelnetEnabled") == String("")) && debugTelnetEnabled)
+  else if ((webServer.arg("debugTelnetEnabled") == String("")) && debug.getTelnetEnabled())
   { // debugTelnetEnabled was enabled but should now be disabled
     shouldSaveConfig = true;
-    debugTelnetEnabled = false;
+    debug.enableTelnet(false);
   }
   if ((webServer.arg("mdnsEnabled") == String("on")) && !mdnsEnabled)
   { // mdnsEnabled was disabled but should now be enabled
@@ -1954,7 +1949,7 @@ bool updateCheck()
       updateLcdAvailableVersion = updateJson[nextion.getModel()]["version"].as<int>();
       debug.printLn(String(F("UPDATE: updateLcdAvailableVersion: ")) + String(updateLcdAvailableVersion));
       lcdFirmwareUrl = updateJson[nextion.getModel()]["firmware"].as<String>();
-      if (updateLcdAvailableVersion > lcdVersion)
+      if (updateLcdAvailableVersion > nextion.getLCDVersion())
       {
         updateLcdAvailable = true;
         debug.printLn(String(F("UPDATE: New LCD version available: ")) + String(updateLcdAvailableVersion));
