@@ -1,10 +1,10 @@
 // -*- C++ -*-
 // HASwitchPlate Forked
-// 
+//
 // Inherits MIT license from HASwitchPlate.ino
 // most Copyright (c) 2019 Allen Derusha allen@derusha.org
 // little changes Copyright (C) 2020 Gerard Sharp (find me on GitHub)
-// 
+//
 //
 // hmi_nextion.h : A class and support works to interact with the Nextion-brand HMI LCD touchscreen
 //
@@ -44,14 +44,14 @@ extern String mqttLightBrightStateTopic;                   // MQTT topic for out
 extern String mqttMotionStateTopic;                        // MQTT topic for outgoing motion sensor state
 
 // Class These!
-extern bool beepEnabled;                           // Keypress beep enabled
-extern unsigned long beepPrevMillis;                   // will store last time beep was updated
-extern unsigned long beepOnTime;                    // milliseconds of on-time for beep
-extern unsigned long beepOffTime;                   // milliseconds of off-time for beep
-extern boolean beepState;                                  // beep currently engaged
-extern unsigned int beepCounter;                           // Count the number of beeps
-extern byte beepPin;                                       // define beep pin output
-extern uint8_t nextionResetPin;                       // Pin for Nextion power rail switch (GPIO12/D6)
+extern bool     beepEnabled;                           // Keypress beep enabled
+extern uint32_t beepPrevMillis;                   // will store last time beep was updated
+extern uint32_t beepOnTime;                    // milliseconds of on-time for beep
+extern uint32_t beepOffTime;                   // milliseconds of off-time for beep
+extern bool     beepState;                                  // beep currently engaged
+extern uint32_t beepCounter;                           // Count the number of beeps
+extern uint8_t  beepPin;                                       // define beep pin output
+extern uint8_t  nextionResetPin;                       // Pin for Nextion power rail switch (GPIO12/D6)
 
 extern uint32_t tftFileSize;                           // Filesize for TFT firmware upload
 
@@ -64,38 +64,58 @@ extern void espReset();
 
 
 // Ours. But can't be inside the class?
-static const uint8_t maxCacheCount = 14;
+static const uint8_t  maxCacheCount = 14;
 static const uint16_t maxCacheSize = 2100; // 2047; // 18 of 3000 does crash = softloop. 13 of 2600 does too
 
 
 class hmiNextionClass {
-  private:    
+  private:
   public:
     // constructor
     hmiNextionClass(void) { _alive = false; }
-    ~hmiNextionClass(void) { _alive = false; }
+    // destructor
+    ~hmiNextionClass(void)
+    {
+      _alive = false;
+      // Free any memory we alloc'd
+      for( int idx=0;idx<maxCacheCount;idx++)
+      {
+        if( _pageCache[idx] )
+        {
+          free( _pageCache[idx] );
+          _pageCache[idx]=NULL;
+          _pageCacheLen[idx]=0;
+        }
+      }
+    }
 
-    const byte Suffix[3] = {0xFF, 0xFF, 0xFF};    // Standard suffix for Nextion commands
+    ////////////////////////////////////////////////////////////////////////////////////////////////////
+    // visible constants and variables
+    const uint8_t Suffix[3] = {0xFF, 0xFF, 0xFF};    // Standard suffix for Nextion commands
 
-    // called on setup to initialise all our things
-    void begin(void) {
-        _alive=true;
-        startupCompleteFlag=false;
-        CheckTimer=0;
-        RetryMax = NEXTION_RETRY_MAX;
-        _lcdConnected=false;
-        lcdVersionQueryFlag = false;
-        lcdVersion = 0;
-        ReturnIndex = 0;
-        ActivePage = 0;
-        ReportPage0 = NEXTION_REPORT_PAGE0;
+    ////////////////////////////////////////////////////////////////////////////////////////////////////
+    void begin(void)
+    { // called on setup to initialise all our things
+        _alive               = true;
+        _startupCompleteFlag = false;
+        _checkTimer          = 0;
+        _retryMax            = NEXTION_RETRY_MAX;
+        _lcdConnected        = false;
+        _lcdVersionQueryFlag = false;
+        _lcdVersion          = 0;
+        _returnIndex         = 0;
+        _activePage          = 0;
+        _reportPage0         = NEXTION_REPORT_PAGE0;
 
         // setting the cache up goes here too
-        for( int idx=0;idx<maxCacheCount;idx++){
-          pageCache[idx]=NULL; // null terminate each cache at power-on
-          pageCacheLen[idx]=0;
+        for( int idx=0; idx<maxCacheCount; idx++)
+        {
+          _pageCache[idx]=NULL; // null terminate each cache at power-on
+          _pageCacheLen[idx]=0;
+          _pageIsGlobal[idx]=false; // default to local scope
         }
-        
+        // any pages that default to GlobalScope could go here too
+
         while (!_lcdConnected && (millis() < 5000))
         { // Wait up to 5 seconds for serial input from LCD
           HandleInput();
@@ -111,30 +131,31 @@ class hmiNextionClass {
         }
     }
 
-    // called in loop to maintain all our things
-    void loop(void) {
+    ////////////////////////////////////////////////////////////////////////////////////////////////////
+    void loop(void)
+    { // called in loop to maintain all our things
       if (HandleInput())
       { // Process user input from HMI
         ProcessInput();
       }
 
-      if ((lcdVersion < 1) && (millis() <= (RetryMax * CheckInterval)))
+      if ((_lcdVersion < 1) && (millis() <= (_retryMax * CheckInterval)))
       { // Attempt to connect to LCD panel to collect model and version info during startup
         Connect();
       }
-      else if ((lcdVersion > 0) && (millis() <= (RetryMax * CheckInterval)) && !startupCompleteFlag)
+      else if ((_lcdVersion > 0) && (millis() <= (_retryMax * CheckInterval)) && !_startupCompleteFlag)
       { // We have LCD info, so trigger an update check + report
         if (updateCheck())
         { // Send a status update if the update check worked
           mqttStatusUpdate();
-          startupCompleteFlag = true;
+          _startupCompleteFlag = true;
         }
       }
-      else if ((millis() > (RetryMax * CheckInterval)) && !startupCompleteFlag)
+      else if ((millis() > (_retryMax * CheckInterval)) && !_startupCompleteFlag)
       { // We still don't have LCD info so go ahead and run the rest of the checks once at startup anyway
         updateCheck();
         mqttStatusUpdate();
-        startupCompleteFlag = true;
+        _startupCompleteFlag = true;
       }
 
     }
@@ -142,34 +163,34 @@ class hmiNextionClass {
     ////////////////////////////////////////////////////////////////////////////////////////////////////
     void Connect()
     {
-        if ((millis() - CheckTimer) >= CheckInterval)
+        if ((millis() - _checkTimer) >= CheckInterval)
         {
-            static unsigned int RetryCount = 0;
-            if ((Model.length() == 0) && (RetryCount < (RetryMax - 2)))
+            static uint32_t retryCount = 0;
+            if ((_model.length() == 0) && (retryCount < (_retryMax - 2)))
             { // Try issuing the "connect" command a few times
-            debug.printLn(HMI, F("HMI: sending Nextion connect request"));
-            SendCmd("connect");
-            RetryCount++;
-            CheckTimer = millis();
+              debug.printLn(HMI, F("HMI: sending Nextion connect request"));
+              SendCmd("connect");
+              retryCount++;
+              _checkTimer = millis();
             }
-            else if ((Model.length() == 0) && (RetryCount < RetryMax))
+            else if ((_model.length() == 0) && (retryCount < _retryMax))
             { // If we still don't have model info, try to change nextion serial speed from 9600 to 115200
-            SetSpeed();
-            RetryCount++;
-            debug.printLn(HMI, F("HMI: sending Nextion serial speed 115200 request"));
-            CheckTimer = millis();
+              SetSpeed();
+              retryCount++;
+              debug.printLn(HMI, F("HMI: sending Nextion serial speed 115200 request"));
+              _checkTimer = millis();
             }
-            else if ((lcdVersion < 1) && (RetryCount <= RetryMax))
+            else if ((_lcdVersion < 1) && (retryCount <= _retryMax))
             {
-            if (Model.length() == 0)
-            { // one last hail mary, maybe the serial speed is set correctly now
-                SendCmd("connect");
-            }
-            SendCmd("get " + lcdVersionQuery);
-            lcdVersionQueryFlag = true;
-            RetryCount++;
-            debug.printLn(HMI, F("HMI: sending Nextion version query"));
-            CheckTimer = millis();
+              if (_model.length() == 0)
+              { // one last hail mary, maybe the serial speed is set correctly now
+                  SendCmd("connect");
+              }
+              SendCmd("get " + _lcdVersionQuery);
+              _lcdVersionQueryFlag = true;
+              retryCount++;
+              debug.printLn(HMI, F("HMI: sending Nextion version query"));
+              _checkTimer = millis();
             }
         }
     }
@@ -185,8 +206,8 @@ class hmiNextionClass {
       delay(100);
       digitalWrite(nextionResetPin, HIGH);
 
-      unsigned long lcdResetTimer = millis();
-      const unsigned long lcdResetTimeout = 5000;
+      uint32_t lcdResetTimer = millis();
+      const uint32_t lcdResetTimeout = 5000;
 
       _lcdConnected = false;
       while (!_lcdConnected && (millis() < (lcdResetTimer + lcdResetTimeout)))
@@ -196,9 +217,9 @@ class hmiNextionClass {
       if (_lcdConnected)
       {
         debug.printLn(F("HMI: Rebooting LCD completed"));
-        if (ActivePage)
+        if (_activePage)
         {
-          SendCmd("page " + String(ActivePage));
+          SendCmd("page " + String(_activePage));
         }
       }
       else
@@ -212,22 +233,25 @@ class hmiNextionClass {
     ////////////////////////////////////////////////////////////////////////////////////////////////////
     void ReplayCmd(void)
     {
-    //  debug.printLn(HMI,String(F("--- Entry Point Replay Cmd ")) + ActivePage);
-    //  if( 1 == ActivePage) {
-    //    debug.printLn(HMI,String(F("--- Contents  ")) + pageCache[ActivePage]);
+    //  debug.printLn(HMI,String(F("--- Entry Point Replay Cmd ")) + _activePage);
+    //  if( 1 == _activePage)
+    //  {
+    //    debug.printLn(HMI,String(F("--- Contents  ")) + _pageCache[_activePage]);
     //  }
-      if( ActivePage >= maxCacheCount ) {
-        debug.printLn(HMI, String(F("Cache cannot replay for high-order page: ")) + ActivePage );
+      if( _activePage >= maxCacheCount )
+      {
+        debug.printLn(HMI, String(F("Cache cannot replay for high-order page: ")) + _activePage );
         return;
       }
       // Do nothing if the cache is empty
-      if( pageCache[ActivePage] == NULL ) {
+      if( _pageCache[_activePage] == NULL )
+      {
         return;
       }
       // Do something if the cache is not.
       //StaticJsonDocument<maxCacheSize> replayCommands;
       DynamicJsonDocument replayCommands(maxCacheSize);
-      DeserializationError jsonError = deserializeJson(replayCommands, pageCache[ActivePage]);
+      DeserializationError jsonError = deserializeJson(replayCommands, _pageCache[_activePage]);
       if (jsonError)
       { // Couldn't parse incoming JSON command
         debug.printLn(HMI,String(F("HMI: [ERROR] Failed to replay cache on page change. Reported error: ")) + String(jsonError.c_str()));
@@ -236,19 +260,21 @@ class hmiNextionClass {
       {
         // we saved ram by not storing the p[x]. text, so re-add it here
         // can we do this with printf?
-        String preface=String("p[") + ActivePage + String("].");
+        String preface=String("p[") + _activePage + String("].");
         JsonObject replayObj = replayCommands.as<JsonObject>();
         //JsonArray replayArray = replayCommands.as<JsonArray>();
-    //    if( 1 == ActivePage ) {
+    //    if( 1 == _activePage )
+    //    {
     //      debug.printLn(HMI,String(F("--- ah wea  ")) + replayCommands.size() + "  " + replayObj.size() + "  " + preface);
     //    }
-        for (JsonPair keyValue : replayObj) {
+        for (JsonPair keyValue : replayObj)
+        {
           //String subsequent = replayCommands[idx];
           String thiskey=keyValue.key().c_str();
           String thisvalue=keyValue.value().as<char*>();
           String resultant = preface + thiskey + "=" + thisvalue;
-    //      debug.printLn(HMI,String(F("HMI:  ")) + " " + resultant); // _SendCmd has a printf itself
-          _SendCmd(resultant);
+    //      debug.printLn(HMI,String(F("HMI:  ")) + " " + resultant); // _sendCmd has a printf itself
+          _sendCmd(resultant);
           delayMicroseconds(200); // Larger JSON objects can take a while to run through over serial,
         }                         // give the ESP and Nextion a moment to deal with life
       }
@@ -262,7 +288,8 @@ class hmiNextionClass {
       // or p[20].b[13].pco=65535
       // we save ram by not storing the page number text
 
-      if( page >= maxCacheCount ) {
+      if( page >= maxCacheCount )
+      {
         debug.printLn(HMI,String(F("Cache not stored for high-order page: ")) + page );
         return;
       }
@@ -273,29 +300,34 @@ class hmiNextionClass {
       int nom = 0;
       char buffer[maxCacheSize];
 
-      if( Cmd.charAt(4)==']' ) { // page 10-99
+      if( Cmd.charAt(4)==']' )
+      { // page 10-99
         nom=6;
-      } else { // page 0-9
+      }
+      else
+      { // page 0-9
         nom=5;
       }
       String pageFree =object.substring(nom);
 
     //  debug.printLn(HMI,String(F("--- debug ---  ")) + pageFree + "   " + value);
 
-      // In the pageCache[page], find pageFree entry and if it exists, replace it with pageFree+"="+value. If it does not exist, add it.
+      // In the _pageCache[page], find pageFree entry and if it exists, replace it with pageFree+"="+value. If it does not exist, add it.
       //StaticJsonDocument<maxCacheSize> cacheCommands;
       DynamicJsonDocument cacheCommands(maxCacheSize);
-      if( pageCache[page] != NULL) {
-        DeserializationError jsonError = deserializeJson(cacheCommands, pageCache[page]);
+      if( _pageCache[page] != NULL)
+      {
+        DeserializationError jsonError = deserializeJson(cacheCommands, _pageCache[page]);
         if (jsonError)
         { // Couldn't parse incoming JSON command
           debug.printLn(HMI,String(F("Internal: [ERROR] Failed to update cache. Reported error: ")) + String(jsonError.c_str()));
-          debug.printLn(HMI,String(F("Internal: [DEBUG] Input String was: >>")) + Cmd + String(F("<<, cache was >>")) + pageCache[page] + String(F("<<")));
+          debug.printLn(HMI,String(F("Internal: [DEBUG] Input String was: >>")) + Cmd + String(F("<<, cache was >>")) + _pageCache[page] + String(F("<<")));
           //
-          if( pageCache[page] != NULL ) { // fragment memory!
-            free(pageCache[page]);
-            pageCache[page]=NULL;
-            pageCacheLen[page]=0;
+          if( _pageCache[page] != NULL )
+          { // fragment memory!
+            free(_pageCache[page]);
+            _pageCache[page]=NULL;
+            _pageCacheLen[page]=0;
           }
           return;
         }
@@ -305,33 +337,41 @@ class hmiNextionClass {
       buffer[maxCacheSize-1]='\0'; // force null termination
       int buflen=strlen(buffer);
 
-      if( count > 0 && buflen > pageCacheLen[page] ) { // including when pageCacheLen[page]==0
-        if( pageCache[page] == NULL ) { // new malloc
-          pageCache[page]=(char*)malloc( sizeof(char) * (buflen+1) );
-          if(pageCache[page] == NULL) { // oops
-            pageCacheLen[page]=0;
+      if( count > 0 && buflen > _pageCacheLen[page] )
+      { // including when _pageCacheLen[page]==0
+        if( _pageCache[page] == NULL )
+        { // new malloc
+          _pageCache[page]=(char*)malloc( sizeof(char) * (buflen+1) );
+          if(_pageCache[page] == NULL)
+          { // oops
+            _pageCacheLen[page]=0;
             debug.printLn(HMI,String(F("Internal: [ERROR] Failed to malloc cache, wanted "))+buflen);
             return;
           }
-        } else { // realloc
-          pageCache[page]=(char*)realloc((void*)pageCache[page], sizeof(char) * (buflen+1));
-          if(pageCache[page] == NULL) { // oops
-            pageCacheLen[page]=0;
-            debug.printLn(HMI,String(F("Internal: [ERROR] Failed to realloc cache, was ")) + pageCacheLen[page]);
+        }
+        else
+        { // realloc
+          _pageCache[page]=(char*)realloc((void*)_pageCache[page], sizeof(char) * (buflen+1));
+          if(_pageCache[page] == NULL)
+          { // oops
+            _pageCacheLen[page]=0;
+            debug.printLn(HMI,String(F("Internal: [ERROR] Failed to realloc cache, was ")) + _pageCacheLen[page]);
             return;
           }
         }
-        pageCacheLen[page]=buflen+1;
+        _pageCacheLen[page]=buflen+1;
       }
 
-      if( count > 0 ) {
-        strncpy(pageCache[page],buffer,buflen);
-        pageCache[page][buflen]='\0'; // paranoia, force null termination
+      if( count > 0 )
+      {
+        strncpy(_pageCache[page],buffer,buflen);
+        _pageCache[page][buflen]='\0'; // paranoia, force null termination
       }
 
-      if( page == 1 ) {
-    //    debug.printLn(HMI,String(F("---  ")) + pageCache[page]);
-      debug.printLn(HMI,String(F("SYSTEM: Heap Status: ")) + String(ESP.getFreeHeap()) + String(F(" ")) + String(ESP.getHeapFragmentation()) + String(F("%")) );
+      if( page == 1 )
+      { // More Debug
+    //    debug.printLn(HMI,String(F("---  ")) + _pageCache[page]);
+        debug.printLn(HMI,String(F("SYSTEM: Heap Status: ")) + String(ESP.getFreeHeap()) + String(F(" ")) + String(ESP.getHeapFragmentation()) + String(F("%")) );
       }
       // and garbage collect
       //cacheCommands.clear();
@@ -339,16 +379,9 @@ class hmiNextionClass {
 
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////
-    void SetAttr(String hmiAttribute, String hmiValue)
+    inline void SetAttr(String hmiAttribute, String hmiValue)
     { // Set the value of a Nextion component attribute
       SendCmd(hmiAttribute + "=" + hmiValue);
-      /*
-      Serial1.print(hmiAttribute);
-      Serial1.print("=");
-      Serial1.print(hmiValue);
-      Serial1.write(Suffix, sizeof(Suffix));
-      debug.printLn(HMI,String(F("HMI OUT: '")) + hmiAttribute + "=" + hmiValue + "'");
-      */
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -365,26 +398,36 @@ class hmiNextionClass {
     void SendCmd(String Cmd)
     { // maybe send a commmand to the panel
       // p[1].b[1].text="Hello World"
-      if( Cmd.startsWith("p[") && (Cmd.charAt(3)==']' || Cmd.charAt(4)==']')) {
+      if( Cmd.startsWith("p[") && (Cmd.charAt(3)==']' || Cmd.charAt(4)==']'))
+      {
         int tgtPage;
         // who wants to bet there is a cleaner way to turn p[0] to p[99] into integer 0 to 99?
-        if(Cmd.charAt(3)==']') {  tgtPage=(Cmd.charAt(2)-'0');
-        } else {  tgtPage=((Cmd.charAt(2)-'0')*10) + (Cmd.charAt(3)-'0');
+        if(Cmd.charAt(3)==']')
+        {
+          tgtPage=(Cmd.charAt(2)-'0');
+        }
+        else
+        {
+          tgtPage=((Cmd.charAt(2)-'0')*10) + (Cmd.charAt(3)-'0');
         }
 
         // Always add the entry to the list
         appendCmd(tgtPage,Cmd);
 
         // but only render it if the page is active, or the page is global
-        if (tgtPage == ActivePage || pageIsGlobal[tgtPage]) {
-          _SendCmd(Cmd);
-        } // else {
-          //debug.printLn(HMI,String(F("HMI Skip: ")) + Cmd);
-        //}
+        if (tgtPage == _activePage || _pageIsGlobal[tgtPage])
+        {
+          _sendCmd(Cmd);
+        }
+        // else
+        // {
+          // debug.printLn(HMI,String(F("HMI Skip: ")) + Cmd);
+        // }
 
-      } else {
-        // not a button / attribute, send it through
-        _SendCmd(Cmd);
+      }
+      else
+      { // not a button / attribute, send it through
+        _sendCmd(Cmd);
       }
     }
 
@@ -428,59 +471,59 @@ class hmiNextionClass {
     bool HandleInput()
     { // Handle incoming serial data from the Nextion panel
       // This will collect serial data from the panel and place it into the global buffer
-      // ReturnBuffer[ReturnIndex]
+      // _returnBuffer[_returnIndex]
       // Return: true if we've received a string of 3 consecutive 0xFF values
       // Return: false otherwise
-      bool CommandComplete = false;
-      static int TermByteCnt = 0;   // counter for our 3 consecutive 0xFFs
+      bool commandComplete = false;
+      static int termByteCnt = 0;   // counter for our 3 consecutive 0xFFs
       static String hmiDebug = "HMI IN: "; // assemble a string for debug output
 
       if (Serial.available())
       {
         _lcdConnected = true;
-        byte CommandByte = Serial.read();
-        hmiDebug += (" 0x" + String(CommandByte, HEX));
+        uint8_t commandByte = Serial.read();
+        hmiDebug += (" 0x" + String(commandByte, HEX));
         // check to see if we have one of 3 consecutive 0xFF which indicates the end of a command
-        if (CommandByte == 0xFF)
+        if (commandByte == 0xFF)
         {
-          TermByteCnt++;
-          if (TermByteCnt >= 3)
+          termByteCnt++;
+          if (termByteCnt >= 3)
           { // We have received a complete command
-            CommandComplete = true;
-            TermByteCnt = 0; // reset counter
+            commandComplete = true;
+            termByteCnt = 0; // reset counter
           }
         }
         else
         {
-          TermByteCnt = 0; // reset counter if a non-term byte was encountered
+          termByteCnt = 0; // reset counter if a non-term byte was encountered
         }
-        ReturnBuffer[ReturnIndex] = CommandByte;
-        ReturnIndex++;
+        _returnBuffer[_returnIndex] = commandByte;
+        _returnIndex++;
       }
-      if (CommandComplete)
+      if (commandComplete)
       {
         debug.printLn(HMI, hmiDebug);
         hmiDebug = "HMI IN: ";
       }
-      return CommandComplete;
+      return commandComplete;
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////
     void ProcessInput()
     { // Process incoming serial commands from the Nextion panel
       // Command reference: https://www.itead.cc/wiki/Nextion_Instruction_Set#Format_of_Device_Return_Data
-      // tl;dr: command byte, command data, 0xFF 0xFF 0xFF
+      // tl;dr: command uint8_t, command data, 0xFF 0xFF 0xFF
 
-      if (ReturnBuffer[0] == 0x65)
+      if (_returnBuffer[0] == 0x65)
       { // Handle incoming touch command
         // 0x65+Page ID+Component ID+TouchEvent+End
         // Return this data when the touch event created by the user is pressed.
         // Definition of TouchEvent: Press Event 0x01, Release Event 0X00
         // Example: 0x65 0x00 0x02 0x01 0xFF 0xFF 0xFF
         // Meaning: Touch Event, Page 0, Object 2, Press
-        String Page = String(ReturnBuffer[1]);
-        String ButtonID = String(ReturnBuffer[2]);
-        byte ButtonAction = ReturnBuffer[3];
+        String Page = String(_returnBuffer[1]);
+        String ButtonID = String(_returnBuffer[2]);
+        uint8_t ButtonAction = _returnBuffer[3];
 
         if (ButtonAction == 0x01)
         {
@@ -510,35 +553,35 @@ class hmiNextionClass {
           GetAttr("p[" + Page + "].b[" + ButtonID + "].val");
         }
       }
-      else if (ReturnBuffer[0] == 0x66)
+      else if (_returnBuffer[0] == 0x66)
       { // Handle incoming "sendme" page number
         // 0x66+PageNum+End
         // Example: 0x66 0x02 0xFF 0xFF 0xFF
         // Meaning: page 2
-        String Page = String(ReturnBuffer[1]);
+        String Page = String(_returnBuffer[1]);
         debug.printLn(HMI, String(F("HMI IN: [sendme Page] '")) + Page + "'");
-        // if ((ActivePage != Page.toInt()) && ((Page != "0") || ReportPage0))
-        if ((Page != "0") || ReportPage0)
+        // if ((_activePage != Page.toInt()) && ((Page != "0") || _reportPage0))
+        if ((Page != "0") || _reportPage0)
         { // If we have a new page AND ( (it's not "0") OR (we've set the flag to report 0 anyway) )
-          ActivePage = Page.toInt();
+          _activePage = Page.toInt();
           ReplayCmd();
           String mqttPageTopic = mqttStateTopic + "/page";
           debug.printLn(MQTT, String(F("MQTT OUT: '")) + mqttPageTopic + "' : '" + Page + "'");
           mqttClient.publish(mqttPageTopic, Page);
         }
       }
-      else if (ReturnBuffer[0] == 0x67)
+      else if (_returnBuffer[0] == 0x67)
       { // Handle touch coordinate data
         // 0X67+Coordinate X High+Coordinate X Low+Coordinate Y High+Coordinate Y Low+TouchEvent+End
         // Example: 0X67 0X00 0X7A 0X00 0X1E 0X01 0XFF 0XFF 0XFF
         // Meaning: Coordinate (122,30), Touch Event: Press
         // issue  command "sendxy=1" to enable this output
-        uint16_t xCoord = ReturnBuffer[1];
-        xCoord = xCoord * 256 + ReturnBuffer[2];
-        uint16_t yCoord = ReturnBuffer[3];
-        yCoord = yCoord * 256 + ReturnBuffer[4];
+        uint16_t xCoord = _returnBuffer[1];
+        xCoord = xCoord * 256 + _returnBuffer[2];
+        uint16_t yCoord = _returnBuffer[3];
+        yCoord = yCoord * 256 + _returnBuffer[4];
         String xyCoord = String(xCoord) + ',' + String(yCoord);
-        byte TouchAction = ReturnBuffer[5];
+        uint8_t TouchAction = _returnBuffer[5];
         if (TouchAction == 0x01)
         {
           debug.printLn(HMI,String(F("HMI IN: [Touch ON] '")) + xyCoord + "'");
@@ -554,15 +597,15 @@ class hmiNextionClass {
           mqttClient.publish(mqttTouchTopic, xyCoord);
         }
       }
-      else if (ReturnBuffer[0] == 0x70)
+      else if (_returnBuffer[0] == 0x70)
       { // Handle get string return
         // 0x70+ASCII string+End
         // Example: 0x70 0x41 0x42 0x43 0x44 0x31 0x32 0x33 0x34 0xFF 0xFF 0xFF
         // Meaning: String data, ABCD1234
         String getString;
-        for (int i = 1; i < ReturnIndex - 3; i++)
+        for (int i = 1; i < _returnIndex - 3; i++)
         { // convert the payload into a string
-          getString += (char)ReturnBuffer[i];
+          getString += (char)_returnBuffer[i];
         }
         debug.printLn(HMI,String(F("HMI IN: [String Return] '")) + getString + "'");
         if (mqttGetSubtopic == "")
@@ -578,23 +621,23 @@ class hmiNextionClass {
           mqttGetSubtopic = "";
         }
       }
-      else if (ReturnBuffer[0] == 0x71)
+      else if (_returnBuffer[0] == 0x71)
       { // Handle get int return
         // 0x71+byte1+byte2+byte3+byte4+End (4 byte little endian)
         // Example: 0x71 0x7B 0x00 0x00 0x00 0xFF 0xFF 0xFF
         // Meaning: Integer data, 123
-        unsigned long getInt = ReturnBuffer[4];
-        getInt = getInt * 256 + ReturnBuffer[3];
-        getInt = getInt * 256 + ReturnBuffer[2];
-        getInt = getInt * 256 + ReturnBuffer[1];
+        uint32_t getInt = _returnBuffer[4];
+        getInt = getInt * 256 + _returnBuffer[3];
+        getInt = getInt * 256 + _returnBuffer[2];
+        getInt = getInt * 256 + _returnBuffer[1];
         String getString = String(getInt);
         debug.printLn(HMI,String(F("HMI IN: [Int Return] '")) + getString + "'");
 
-        if (lcdVersionQueryFlag)
+        if (_lcdVersionQueryFlag)
         {
-          lcdVersion = getInt;
-          lcdVersionQueryFlag = false;
-          debug.printLn(HMI,String(F("HMI IN: lcdVersion '")) + String(lcdVersion) + "'");
+          _lcdVersion = getInt;
+          _lcdVersionQueryFlag = false;
+          debug.printLn(HMI,String(F("HMI IN: lcdVersion '")) + String(_lcdVersion) + "'");
         }
         else if (mqttGetSubtopic == "")
         {
@@ -610,32 +653,31 @@ class hmiNextionClass {
           mqttGetSubtopic = "";
         }
       }
-      else if (ReturnBuffer[0] == 0x63 && ReturnBuffer[1] == 0x6f && ReturnBuffer[2] == 0x6d && ReturnBuffer[3] == 0x6f && ReturnBuffer[4] == 0x6b)
+      else if (_returnBuffer[0] == 0x63 && _returnBuffer[1] == 0x6f && _returnBuffer[2] == 0x6d && _returnBuffer[3] == 0x6f && _returnBuffer[4] == 0x6b)
       { // Catch 'comok' response to 'connect' command: https://www.itead.cc/blog/nextion-hmi-upload-protocol
         String comokField;
         uint8_t comokFieldCount = 0;
-        byte comokFieldSeperator = 0x2c; // ","
+        uint8_t comokFieldSeperator = 0x2c; // ","
 
-        for (uint8_t i = 0; i <= ReturnIndex; i++)
+        for (uint8_t i = 0; i <= _returnIndex; i++)
         { // cycle through each byte looking for our field seperator
-          if (ReturnBuffer[i] == comokFieldSeperator)
+          if (_returnBuffer[i] == comokFieldSeperator)
           { // Found the end of a field, so do something with it.  Maybe.
             if (comokFieldCount == 2)
             {
-              Model = comokField;
-              debug.printLn(HMI,String(F("HMI IN: NextionModel: ")) + Model);
+              _model = comokField;
+              debug.printLn(HMI,String(F("HMI IN: NextionModel: ")) + _model);
             }
             comokFieldCount++;
             comokField = "";
           }
           else
           {
-            comokField += String(char(ReturnBuffer[i]));
+            comokField += String(char(_returnBuffer[i]));
           }
         }
       }
-
-      else if (ReturnBuffer[0] == 0x1A)
+      else if (_returnBuffer[0] == 0x1A)
       { // Catch 0x1A error, possibly from .val query against things that might not support that request
         // 0x1A+End
         // ERROR: Variable name invalid
@@ -643,7 +685,7 @@ class hmiNextionClass {
         // Just reset mqttGetSubtopic and move on with life.
         mqttGetSubtopic = "";
       }
-      ReturnIndex = 0; // Done handling the buffer, reset index back to 0
+      _returnIndex = 0; // Done handling the buffer, reset index back to 0
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -800,14 +842,14 @@ class hmiNextionClass {
     bool OtaResponse()
     { // Monitor the serial port for a 0x05 response within our timeout
 
-      unsigned long nextionCommandTimeout = 2000;   // timeout for receiving termination string in milliseconds
-      unsigned long nextionCommandTimer = millis(); // record current time for our timeout
+      uint32_t nextionCommandTimeout = 2000;   // timeout for receiving termination string in milliseconds
+      uint32_t nextionCommandTimer = millis(); // record current time for our timeout
       bool otaSuccessVal = false;
       while ((millis() - nextionCommandTimer) < nextionCommandTimeout)
       {
         if (Serial.available())
         {
-          byte inByte = Serial.read();
+          uint8_t inByte = Serial.read();
           if (inByte == 0x5)
           {
             otaSuccessVal = true;
@@ -823,83 +865,82 @@ class hmiNextionClass {
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////
-    void debug_page_cache(void) {
+    void debug_page_cache(void)
+    {
       debug.printLn(String(F("")));
       for( int idx=0;idx<maxCacheCount;idx++) {
-        debug.printLn(String(F("debug [")) + idx + String(F("]=")) + pageCacheLen[idx] );
+        debug.printLn(String(F("debug [")) + idx + String(F("]=")) + _pageCacheLen[idx] );
       }
       debug.printLn(String(F("")));
     }
 
+    ////////////////////////////////////////////////////////////////////////////////////////////////////
+    inline uint8_t getActivePage() { return _activePage; }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////
-    uint8_t getActivePage() {
-      return ActivePage;
-    }
-    ////////////////////////////////////////////////////////////////////////////////////////////////////
-    void setActivePage(uint8_t newPage ) {
+    void setActivePage(uint8_t newPage )
+    {
       // bounds checks? dependent effects?
-      ActivePage=newPage;
+      _activePage=newPage;
     }
+
     ////////////////////////////////////////////////////////////////////////////////////////////////////
     void changePage(uint8_t page) {
       if (getActivePage() != page)
       { // Hass likes to send duplicate responses to things like page requests and there are no plans to fix that behavior, so try and track it locally
-        ActivePage=page;
-        SendCmd("page " + String(ActivePage));
+        _activePage=page;
+        SendCmd("page " + String(_activePage));
       }
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////
-    String getModel() {
-      return Model;
-    }
+    inline String getModel() { return _model; }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////
-    void setPageGlobal( uint8_t page, bool newFlag ) {
-      if( page < maxCacheCount ) {
-        pageIsGlobal[page] = newFlag;
-      } else {
+    void setPageGlobal( uint8_t page, bool newFlag )
+    {
+      if( page < maxCacheCount )
+      {
+        _pageIsGlobal[page] = newFlag;
+      }
+      else
+      {
         debug.printLn(HMI,String(F("Cache cannot be global for high-order page: ")) + page );
       }
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////
-    bool getLCDConnected() {
-      return _lcdConnected;
-    }
+    inline bool getLCDConnected() { return _lcdConnected; }
 
-    unsigned long getLCDVersion() {
-      return lcdVersion;
-    }
-
+    ////////////////////////////////////////////////////////////////////////////////////////////////////
+    inline uint32_t getLCDVersion() { return _lcdVersion; }
 
   protected:
     //;
-    const unsigned long CheckInterval = NEXTION_CHECK_INTERVAL;        // Time in msec between nextion connection checks
-    const String lcdVersionQuery = "p[0].b[2].val";  // Object ID for lcdVersion in HMI
-    
-    bool _alive;
-    bool _lcdConnected;                              // Set to true when we've heard something from the LCD
-    bool startupCompleteFlag;                        // Startup process has completed
-    unsigned long CheckTimer;                        // Timer for nextion connection checks
-    unsigned int RetryMax;                           // Attempt to connect to panel this many times
-    bool ReportPage0;                    // If false, don't report page 0 sendme
-    unsigned long lcdVersion;                        // Int to hold current LCD FW version number
-    unsigned long updateLcdAvailableVersion;         // Int to hold the new LCD FW version number
-    bool lcdVersionQueryFlag;                        // Flag to set if we've queried lcdVersion
-    String Model;                                    // Record reported model number of LCD panel
-    uint8_t ReturnIndex;                             // Index for nextionReturnBuffer
-    uint8_t ActivePage;                              // Track active LCD page
-    byte ReturnBuffer[128];                   // Byte array to pass around data coming from the panel
+    const uint32_t CheckInterval = NEXTION_CHECK_INTERVAL;        // Time in msec between nextion connection checks
+    const String _lcdVersionQuery = "p[0].b[2].val";  // Object ID for lcdVersion in HMI
 
-    bool pageIsGlobal[maxCacheCount] = {false,};
-    char* pageCache[maxCacheCount] = {NULL,};
-    uint16_t pageCacheLen[maxCacheCount] = {0,};
-    //static char hopeless[maxCacheSize] =  {'\0',};
+    bool     _alive;                      // Flag that data structures are initialised and functions can run without error
+    bool     _lcdConnected;               // Set to true when we've heard something from the LCD
+    bool     _startupCompleteFlag;        // Startup process has completed (subtly different from _alive)
+    uint32_t _checkTimer;                 // Timer for nextion connection checks
+    uint32_t _retryMax;                   // Attempt to connect to panel this many times
+    bool     _reportPage0;                // If false, don't report page 0 sendme
+    uint32_t _lcdVersion;                 // Int to hold current LCD FW version number
+    uint32_t _updateLcdAvailableVersion;  // Int to hold the new LCD FW version number
+    bool     _lcdVersionQueryFlag;        // Flag to set if we've queried lcdVersion
+    String   _model;                      // Record reported model number of LCD panel
+    uint8_t  _returnIndex;                // Index for nextionreturnBuffer
+    uint8_t  _activePage;                 // Track active LCD page
+    uint8_t  _returnBuffer[128];          // Byte array to pass around data coming from the panel
 
+    bool     _pageIsGlobal[maxCacheCount]; // when true buttons on page are global-scope, when false they are local-scope
+    char*    _pageCache[maxCacheCount];    // malloc'd array holding the JSON of the page
+    uint16_t _pageCacheLen[maxCacheCount]; // length of malloc'd array to help avoid (*NULL)
+    //static char hopeless[maxCacheSize];  // debugging
 
-    void _SendCmd(String Cmd)
+    ////////////////////////////////////////////////////////////////////////////////////////////////////
+    void _sendCmd(String Cmd)
     { // Send a raw command to the Nextion panel
         Serial1.print(Cmd);
         Serial1.write(Suffix, sizeof(Suffix));

@@ -53,34 +53,33 @@ const float haspVersion = HASP_VERSION;              // Current HASP software re
 const char wifiConfigPass[9] = WIFI_CONFIG_PASSWORD; // First-time config WPA2 password
 const char wifiConfigAP[14] = WIFI_CONFIG_AP;        // First-time config SSID
 bool shouldSaveConfig = false;                       // Flag to save json config to SPIFFS
-bool nextionReportPage0 = NEXTION_REPORT_PAGE0;      // If false, don't report page 0 sendme
-const unsigned long updateCheckInterval = 43200000; // Time in msec between update checks (12 hours)
-unsigned long updateCheckTimer = 0;                 // Timer for update check
+const uint32_t updateCheckInterval = UPDATE_CHECK_INTERVAL; // Time in msec between update checks (12 hours)
 bool updateEspAvailable = false;                    // Flag for update check to report new ESP FW version
 float updateEspAvailableVersion;                    // Float to hold the new ESP FW version number
 bool updateLcdAvailable = false;                    // Flag for update check to report new LCD FW version
 bool debugSerialD8Enabled = true;                   // Enable hardware serial debug output on pin D8
-const unsigned long telnetInputMax = 128;           // Size of user input buffer for user telnet session
+const uint32_t telnetInputMax = 128;                // Size of user input buffer for user telnet session
 bool motionEnabled = false;                         // Motion sensor is enabled
-bool mdnsEnabled = false;                            // mDNS enabled
+bool mdnsEnabled = false;                           // mDNS enabled
 bool beepEnabled = false;                           // Keypress beep enabled
-unsigned long beepPrevMillis = 0;                   // will store last time beep was updated
-unsigned long beepOnTime = 1000;                    // milliseconds of on-time for beep
-unsigned long beepOffTime = 1000;                   // milliseconds of off-time for beep
-boolean beepState;                                  // beep currently engaged
-unsigned int beepCounter;                           // Count the number of beeps
-byte beepPin;                                       // define beep pin output
+uint32_t beepOnTime = BEEP_DEFAULT_TIME;            // milliseconds of on-time for beep
+uint32_t beepOffTime = BEEP_DEFAULT_TIME;           // milliseconds of off-time for beep
+bool beepState;                                     // beep currently engaged
+uint32_t beepCounter;                               // Count the number of beeps
+uint8_t beepPin;                                    // define beep pin output
 uint8_t motionPin = 0;                              // GPIO input pin for motion sensor if connected and enabled
 bool motionActive = false;                          // Motion is being detected
-const unsigned long motionLatchTimeout = 30000;     // Latch time for motion sensor
-const unsigned long motionBufferTimeout = 1000;     // Latch time for motion sensor
-unsigned long updateLcdAvailableVersion;            // Int to hold the new LCD FW version number
-const long statusUpdateInterval = 300000;           // Time in msec between publishing MQTT status updates (5 minutes)
-long statusUpdateTimer = 0;                         // Timer for update check
-const unsigned long connectTimeout = CONNECTION_TIMEOUT; // Timeout for WiFi and MQTT connection attempts in seconds
-const unsigned long reConnectTimeout = RECONNECT_TIMEOUT; // Timeout for WiFi reconnection attempts in seconds
-byte espMac[6];                                     // Byte array to store our MAC address
-const uint16_t mqttMaxPacketSize = MQTT_MAX_PACKET_SIZE; // Size of buffer for incoming MQTT message
+const uint32_t motionLatchTimeout = MOTION_LATCH_TIMEOUT;          // Latch time for motion sensor
+const uint32_t motionBufferTimeout = MOTION_BUFFER_TIMEOUT;        // Latch time for motion sensor
+uint32_t updateLcdAvailableVersion;                                // Int to hold the new LCD FW version number
+const int32_t statusUpdateInterval = MQTT_STATUS_UPDATE_INTERVAL;  // Time in msec between publishing MQTT status updates (5 minutes)
+const uint32_t connectTimeout = CONNECTION_TIMEOUT;       // Timeout for WiFi and MQTT connection attempts in seconds
+const uint32_t reConnectTimeout = RECONNECT_TIMEOUT;      // Timeout for WiFi reconnection attempts in seconds
+uint8_t espMac[6];                                        // Byte array to store our MAC address
+const uint16_t mqttMaxPacketSize = MQTT_MAX_PACKET_SIZE;  // Size of buffer for incoming MQTT message
+uint32_t statusUpdateTimer = 0;                           // Timer for update check
+uint32_t updateCheckTimer = 0;                      // Timer for update check
+uint32_t beepTimer = 0;                             // will store last time beep was updated
 String mqttClientId;                                // Auto-generated MQTT ClientID
 String mqttGetSubtopic;                             // MQTT subtopic for incoming commands requesting .val
 String mqttGetSubtopicJSON;                         // MQTT object buffer for JSON status when requesting .val
@@ -97,21 +96,20 @@ String mqttLightBrightCommandTopic;                 // MQTT topic for incoming p
 String mqttLightBrightStateTopic;                   // MQTT topic for outgoing panel backlight dimmer state
 String mqttMotionStateTopic;                        // MQTT topic for outgoing motion sensor state
 String nextionModel;                                // Record reported model number of LCD panel
-const byte nextionSuffix[] = {0xFF, 0xFF, 0xFF};    // Standard suffix for Nextion commands
 uint32_t tftFileSize = 0;                           // Filesize for TFT firmware upload
 uint8_t nextionResetPin = D6;                       // Pin for Nextion power rail switch (GPIO12/D6)
 
-WiFiClient wifiClient;
-WiFiClient wifiMQTTClient;
-MQTTClient mqttClient(mqttMaxPacketSize);
-ESP8266WebServer webServer(80);
+WiFiClient wifiClient;                     // client for OTA?
+WiFiClient wifiMQTTClient;                 // client for MQTT
+MQTTClient mqttClient(mqttMaxPacketSize);  // MQTT Object
+ESP8266WebServer webServer(80);            // Server listening for HTTP
 ESP8266HTTPUpdateServer httpOTAUpdate;
-WiFiServer telnetServer(23);
+WiFiServer telnetServer(23);               // Server listening for Telnet
 WiFiClient telnetClient;
-MDNSResponder::hMDNSService hMDNSService;
+MDNSResponder::hMDNSService hMDNSService;  // Bonjour
 
-hmiNextionClass nextion; // our LCD
-debugClass debug; // our serial debug interface
+hmiNextionClass nextion;  // our LCD Object
+debugClass debug;         // our debug Object, USB Serial and/or Telnet
 
 
 // Additional CSS style to match Hass theme
@@ -288,6 +286,7 @@ void loop()
     updateCheckTimer = millis();
     if (updateCheck())
     { // Send a status update if the update check worked
+      statusUpdateTimer = millis();
       mqttStatusUpdate();
     }
   }
@@ -304,20 +303,20 @@ void loop()
 
   if (beepEnabled)
   { // Process Beeps
-    if ((beepState == true) && (millis() - beepPrevMillis >= beepOnTime) && ((beepCounter > 0)))
+    if ((beepState == true) && (millis() - beepTimer >= beepOnTime) && ((beepCounter > 0)))
     {
       beepState = false;         // Turn it off
-      beepPrevMillis = millis(); // Remember the time
+      beepTimer = millis(); // Remember the time
       analogWrite(beepPin, 254); // start beep for beepOnTime
       if (beepCounter > 0)
       { // Update the beep counter.
         beepCounter--;
       }
     }
-    else if ((beepState == false) && (millis() - beepPrevMillis >= beepOffTime) && ((beepCounter >= 0)))
+    else if ((beepState == false) && (millis() - beepTimer >= beepOffTime) && ((beepCounter >= 0)))
     {
       beepState = true;          // turn it on
-      beepPrevMillis = millis(); // Remember the time
+      beepTimer = millis(); // Remember the time
       analogWrite(beepPin, 0);   // stop beep for beepOffTime
     }
   }
@@ -448,7 +447,7 @@ void mqttConnect()
       }
       debug.printLn(String(F("MQTT connection attempt ")) + String(mqttReconnectCount) + String(F(" failed with rc ")) + String(mqttClient.returnCode()) + String(F(".  Trying again in 30 seconds.")));
       nextion.SetAttr("p[0].b[1].txt", "\"WiFi Connected:\\r " + String(WiFi.SSID()) + "\\rIP: " + WiFi.localIP().toString() + "\\r\\rMQTT Connect to:\\r " + String(mqttServer) + "\\rFAILED rc=" + String(mqttClient.returnCode()) + "\\r\\rRetry in 30 sec\"");
-      unsigned long mqttReconnectTimer = millis(); // record current time for our timeout
+      uint32_t mqttReconnectTimer = millis(); // record current time for our timeout
       while ((millis() - mqttReconnectTimer) < 30000)
       { // Handle HTTP and OTA while we're waiting 30sec for MQTT to reconnect
         if (nextion.HandleInput())
@@ -500,17 +499,23 @@ void mqttCallback(String &strTopic, String &strPayload)
   }
   else if (strTopic == (mqttCommandTopic + "/globalpage") || strTopic == (mqttGroupCommandTopic + "/globalpage"))
   { // '[...]/device/command/globalpage' -m '1' sets pageIsGlobal flag
-    if( strPayload == "" ) {
-      // eh, what to do with an empty payload?
-    } else { // could tokenise with commas using subtring?
+    if( strPayload == "" )
+    {
+      ; // eh, what to do with an empty payload?
+    }
+    else
+    { // could tokenise with commas using subtring?
       nextion.setPageGlobal(strPayload.toInt(),true);
     }
   }
   else if (strTopic == (mqttCommandTopic + "/localpage") || strTopic == (mqttGroupCommandTopic + "/localpage"))
   { // '[...]/device/command/globalpage' -m '1' sets pageIsGlobal flag
-    if( strPayload == "" ) {
-      // eh, what to do with an empty payload?
-    } else { // could tokenise with commas using subtring?
+    if( strPayload == "" )
+    {
+      ; // eh, what to do with an empty payload?
+    }
+    else
+    { // could tokenise with commas using subtring?
       nextion.setPageGlobal(strPayload.toInt(),false);
     }
   }
@@ -645,7 +650,7 @@ void mqttStatusUpdate()
   {
     mqttStatusPayload += String(F("\"updateLcdAvailable\":false,"));
   }
-  mqttStatusPayload += String(F("\"espUptime\":")) + String(long(millis() / 1000)) + String(F(","));
+  mqttStatusPayload += String(F("\"espUptime\":")) + String(int32_t(millis() / 1000)) + String(F(","));
   mqttStatusPayload += String(F("\"signalStrength\":")) + String(WiFi.RSSI()) + String(F(","));
   mqttStatusPayload += String(F("\"haspIP\":\"")) + WiFi.localIP().toString() + String(F("\","));
   mqttStatusPayload += String(F("\"heapFree\":")) + String(ESP.getFreeHeap()) + String(F(","));
@@ -739,11 +744,11 @@ void espWifiSetup()
     WiFi.mode(WIFI_STA);
     WiFi.begin(wifiSSID, wifiPass);
 
-    unsigned long wifiReconnectTimer = millis();
+    uint32_t wifiReconnectTimer = millis();
     while (WiFi.status() != WL_CONNECTED)
     {
       delay(500);
-      if (millis() >= (wifiReconnectTimer + (connectTimeout * 1000)))
+      if (millis() >= (wifiReconnectTimer + (connectTimeout * ASECOND)))
       { // If we've been trying to reconnect for connectTimeout seconds, reboot and try again
         debug.printLn(F("WIFI: Failed to connect and hit timeout"));
         espReset();
@@ -767,11 +772,11 @@ void espWifiReconnect()
   WiFi.mode(WIFI_STA);
   WiFi.begin(wifiSSID, wifiPass);
 
-  unsigned long wifiReconnectTimer = millis();
+  uint32_t wifiReconnectTimer = millis();
   while (WiFi.status() != WL_CONNECTED)
   {
     delay(500);
-    if (millis() >= (wifiReconnectTimer + (reConnectTimeout * 1000)))
+    if (millis() >= (wifiReconnectTimer + (reConnectTimeout * ASECOND)))
     { // If we've been trying to reconnect for reConnectTimeout seconds, reboot and try again
       debug.printLn(F("WIFI: Failed to reconnect and hit timeout"));
       espReset();
@@ -811,7 +816,7 @@ void espSetupOta()
     nextion.SetAttr("p[0].b[1].txt", "\"ESP OTA Update\\rComplete!\"");
     espReset();
   });
-  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+  ArduinoOTA.onProgress([](uint32_t progress, uint32_t total) {
     nextion.SetAttr("p[0].b[1].txt", "\"ESP OTA Update\\rProgress: " + String(progress / (total / 100)) + "%\"");
   });
   ArduinoOTA.onError([](ota_error_t error) {
@@ -1222,7 +1227,7 @@ void webHandleRoot()
   httpMessage += String(F("<br/><b>ESP core version: </b>")) + String(ESP.getCoreVersion());
   httpMessage += String(F("<br/><b>IP Address: </b>")) + String(WiFi.localIP().toString());
   httpMessage += String(F("<br/><b>Signal Strength: </b>")) + String(WiFi.RSSI());
-  httpMessage += String(F("<br/><b>Uptime: </b>")) + String(long(millis() / 1000));
+  httpMessage += String(F("<br/><b>Uptime: </b>")) + String(int32_t(millis() / 1000));
   httpMessage += String(F("<br/><b>Last reset: </b>")) + String(ESP.getResetInfo());
 
   httpMessage += FPSTR(HTTP_END);
@@ -1987,8 +1992,8 @@ void motionSetup()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void motionUpdate()
 {
-  static unsigned long motionLatchTimer = 0;         // Timer for motion sensor latch
-  static unsigned long motionBufferTimer = millis(); // Timer for motion sensor buffer
+  static uint32_t motionLatchTimer = 0;         // Timer for motion sensor latch
+  static uint32_t motionBufferTimer = millis(); // Timer for motion sensor buffer
   static bool motionActiveBuffer = motionActive;
   bool motionRead = digitalRead(motionPin);
 
@@ -2019,7 +2024,7 @@ void motionUpdate()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void handleTelnetClient()
 { // Basic telnet client handling code from: https://gist.github.com/tablatronix/4793677ca748f5f584c95ec4a2b10303
-  static unsigned long telnetInputIndex = 0;
+  static uint32_t telnetInputIndex = 0;
   if (telnetServer.hasClient())
   { // client is connected
     if (!telnetClient || !telnetClient.connected())
@@ -2091,7 +2096,7 @@ String getSubtringField(String data, char separator, int index)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-String printHex8(byte *data, uint8_t length)
+String printHex8(uint8_t *data, uint8_t length)
 { // returns input bytes as printable hex values in the format 01 23 FF
 
   String hex8String;
