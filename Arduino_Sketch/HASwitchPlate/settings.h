@@ -2,6 +2,9 @@
 // so I can store secrets here
 // -- Gerard, 2020
 
+// This file is only #included once, mmkay
+#pragma once
+
 // OPTIONAL: Assign default values here.
 char wifiSSID[32] = ""; // Leave unset for wireless autoconfig. Note that these values will be lost
 char wifiPass[64] = ""; // when updating, but that's probably OK because they will be saved in EEPROM.
