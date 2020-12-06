@@ -338,15 +338,15 @@ void mqttConnect()
   // Check to see if we have a broker configured and notify the user if not
   if (mqttServer[0] == 0)
   {
-    nextion.SendCmd("page 0");
-    nextion.SetAttr("p[0].b[1].font", "6");
-    nextion.SetAttr("p[0].b[1].txt", "\"WiFi Connected!\\r " + String(WiFi.SSID()) + "\\rIP: " + WiFi.localIP().toString() + "\\r\\rConfigure MQTT:\\rhttp://" + WiFi.localIP().toString() + "\"");
+    nextion.sendCmd("page 0");
+    nextion.setAttr("p[0].b[1].font", "6");
+    nextion.setAttr("p[0].b[1].txt", "\"WiFi Connected!\\r " + String(WiFi.SSID()) + "\\rIP: " + WiFi.localIP().toString() + "\\r\\rConfigure MQTT:\\rhttp://" + WiFi.localIP().toString() + "\"");
     while (mqttServer[0] == 0)
     { // Handle HTTP and OTA while we're waiting for MQTT to be configured
       yield();
-      if (nextion.HandleInput())
+      if (nextion.handleInput())
       { // Process user input from HMI
-        nextion.ProcessInput();
+        nextion.processInput();
       }
       webServer.handleClient();
       ArduinoOTA.handle();
@@ -378,9 +378,9 @@ void mqttConnect()
 
     // Generate an MQTT client ID as haspNode + our MAC address
     mqttClientId = String(haspNode) + "-" + String(espMac[0], HEX) + String(espMac[1], HEX) + String(espMac[2], HEX) + String(espMac[3], HEX) + String(espMac[4], HEX) + String(espMac[5], HEX);
-    nextion.SendCmd("page 0");
-    nextion.SetAttr("p[0].b[1].font", "6");
-    nextion.SetAttr("p[0].b[1].txt", "\"WiFi Connected!\\r " + String(WiFi.SSID()) + "\\rIP: " + WiFi.localIP().toString() + "\\r\\rMQTT Connecting:\\r " + String(mqttServer) + "\"");
+    nextion.sendCmd("page 0");
+    nextion.setAttr("p[0].b[1].font", "6");
+    nextion.setAttr("p[0].b[1].txt", "\"WiFi Connected!\\r " + String(WiFi.SSID()) + "\\rIP: " + WiFi.localIP().toString() + "\\r\\rMQTT Connecting:\\r " + String(mqttServer) + "\"");
     debug.printLn(String(F("MQTT: Attempting connection to broker ")) + String(mqttServer) + " as clientID " + mqttClientId);
 
     // Set keepAlive, cleanSession, timeout
@@ -430,11 +430,11 @@ void mqttConnect()
       mqttReconnectCount = 0;
 
       // Update panel with MQTT status
-      nextion.SetAttr("p[0].b[1].txt", "\"WiFi Connected!\\r " + String(WiFi.SSID()) + "\\rIP: " + WiFi.localIP().toString() + "\\r\\rMQTT Connected:\\r " + String(mqttServer) + "\"");
+      nextion.setAttr("p[0].b[1].txt", "\"WiFi Connected!\\r " + String(WiFi.SSID()) + "\\rIP: " + WiFi.localIP().toString() + "\\r\\rMQTT Connected:\\r " + String(mqttServer) + "\"");
       debug.printLn(F("MQTT: connected"));
       if (nextion.getActivePage())
       {
-        nextion.SendCmd("page " + String(nextion.getActivePage()));
+        nextion.sendCmd("page " + String(nextion.getActivePage()));
       }
     }
     else
@@ -446,13 +446,13 @@ void mqttConnect()
         espReset();
       }
       debug.printLn(String(F("MQTT connection attempt ")) + String(mqttReconnectCount) + String(F(" failed with rc ")) + String(mqttClient.returnCode()) + String(F(".  Trying again in 30 seconds.")));
-      nextion.SetAttr("p[0].b[1].txt", "\"WiFi Connected:\\r " + String(WiFi.SSID()) + "\\rIP: " + WiFi.localIP().toString() + "\\r\\rMQTT Connect to:\\r " + String(mqttServer) + "\\rFAILED rc=" + String(mqttClient.returnCode()) + "\\r\\rRetry in 30 sec\"");
+      nextion.setAttr("p[0].b[1].txt", "\"WiFi Connected:\\r " + String(WiFi.SSID()) + "\\rIP: " + WiFi.localIP().toString() + "\\r\\rMQTT Connect to:\\r " + String(mqttServer) + "\\rFAILED rc=" + String(mqttClient.returnCode()) + "\\r\\rRetry in 30 sec\"");
       uint32_t mqttReconnectTimer = millis(); // record current time for our timeout
       while ((millis() - mqttReconnectTimer) < 30000)
       { // Handle HTTP and OTA while we're waiting 30sec for MQTT to reconnect
-        if (nextion.HandleInput())
+        if (nextion.handleInput())
         { // Process user input from HMI
-          nextion.ProcessInput();
+          nextion.processInput();
         }
         webServer.handleClient();
         ArduinoOTA.handle();
@@ -472,16 +472,16 @@ void mqttCallback(String &strTopic, String &strPayload)
 
   // Incoming Namespace (replace /device/ with /group/ for group commands)
   // '[...]/device/command' -m '' = No command requested, respond with mqttStatusUpdate()
-  // '[...]/device/command' -m 'dim=50' = nextion.SendCmd("dim=50")
-  // '[...]/device/command/json' -m '["dim=5", "page 1"]' = nextion.SendCmd("dim=50"), nextion.SendCmd("page 1")
-  // '[...]/device/command/page' -m '1' = nextion.SendCmd("page 1")
+  // '[...]/device/command' -m 'dim=50' = nextion.sendCmd("dim=50")
+  // '[...]/device/command/json' -m '["dim=5", "page 1"]' = nextion.sendCmd("dim=50"), nextion.sendCmd("page 1")
+  // '[...]/device/command/page' -m '1' = nextion.sendCmd("page 1")
   // '[...]/device/command/statusupdate' -m '' = mqttStatusUpdate()
-  // '[...]/device/command/lcdupdate' -m 'http://192.168.0.10/local/HASwitchPlate.tft' = nextion.StartOtaDownload("http://192.168.0.10/local/HASwitchPlate.tft")
-  // '[...]/device/command/lcdupdate' -m '' = nextion.StartOtaDownload("lcdFirmwareUrl")
+  // '[...]/device/command/lcdupdate' -m 'http://192.168.0.10/local/HASwitchPlate.tft' = nextion.startOtaDownload("http://192.168.0.10/local/HASwitchPlate.tft")
+  // '[...]/device/command/lcdupdate' -m '' = nextion.startOtaDownload("lcdFirmwareUrl")
   // '[...]/device/command/espupdate' -m 'http://192.168.0.10/local/HASwitchPlate.ino.d1_mini.bin' = espStartOta("http://192.168.0.10/local/HASwitchPlate.ino.d1_mini.bin")
   // '[...]/device/command/espupdate' -m '' = espStartOta("espFirmwareUrl")
-  // '[...]/device/command/p[1].b[4].txt' -m '' = nextion.GetAttr("p[1].b[4].txt")
-  // '[...]/device/command/p[1].b[4].txt' -m '"Lights On"' = nextion.SetAttr("p[1].b[4].txt", "\"Lights On\"")
+  // '[...]/device/command/p[1].b[4].txt' -m '' = nextion.getAttr("p[1].b[4].txt")
+  // '[...]/device/command/p[1].b[4].txt' -m '"Lights On"' = nextion.setAttr("p[1].b[4].txt", "\"Lights On\"")
 
   debug.printLn(MQTT, String(F("MQTT IN: '")) + strTopic + "' : '" + strPayload + "'");
 
@@ -490,11 +490,11 @@ void mqttCallback(String &strTopic, String &strPayload)
     mqttStatusUpdate(); // return status JSON via MQTT
   }
   else if (strTopic == mqttCommandTopic || strTopic == mqttGroupCommandTopic)
-  { // '[...]/device/command' -m 'dim=50' == nextion.SendCmd("dim=50")
-    nextion.SendCmd(strPayload);
+  { // '[...]/device/command' -m 'dim=50' == nextion.sendCmd("dim=50")
+    nextion.sendCmd(strPayload);
   }
   else if (strTopic == (mqttCommandTopic + "/page") || strTopic == (mqttGroupCommandTopic + "/page"))
-  { // '[...]/device/command/page' -m '1' == nextion.SendCmd("page 1")
+  { // '[...]/device/command/page' -m '1' == nextion.sendCmd("page 1")
     nextion.changePage(strPayload.toInt());
   }
   else if (strTopic == (mqttCommandTopic + "/globalpage") || strTopic == (mqttGroupCommandTopic + "/globalpage"))
@@ -520,22 +520,22 @@ void mqttCallback(String &strTopic, String &strPayload)
     }
   }
   else if (strTopic == (mqttCommandTopic + "/json") || strTopic == (mqttGroupCommandTopic + "/json"))
-  {                               // '[...]/device/command/json' -m '["dim=5", "page 1"]' = nextion.SendCmd("dim=50"), nextion.SendCmd("page 1")
-    nextion.ParseJson(strPayload); // Send to nextion.ParseJson()
+  {                               // '[...]/device/command/json' -m '["dim=5", "page 1"]' = nextion.sendCmd("dim=50"), nextion.sendCmd("page 1")
+    nextion.parseJson(strPayload); // Send to nextion.parseJson()
   }
   else if (strTopic == (mqttCommandTopic + "/statusupdate") || strTopic == (mqttGroupCommandTopic + "/statusupdate"))
   {                     // '[...]/device/command/statusupdate' == mqttStatusUpdate()
     mqttStatusUpdate(); // return status JSON via MQTT
   }
   else if (strTopic == (mqttCommandTopic + "/lcdupdate") || strTopic == (mqttGroupCommandTopic + "/lcdupdate"))
-  { // '[...]/device/command/lcdupdate' -m 'http://192.168.0.10/local/HASwitchPlate.tft' == nextion.StartOtaDownload("http://192.168.0.10/local/HASwitchPlate.tft")
+  { // '[...]/device/command/lcdupdate' -m 'http://192.168.0.10/local/HASwitchPlate.tft' == nextion.startOtaDownload("http://192.168.0.10/local/HASwitchPlate.tft")
     if (strPayload == "")
     {
-      nextion.StartOtaDownload(lcdFirmwareUrl);
+      nextion.startOtaDownload(lcdFirmwareUrl);
     }
     else
     {
-      nextion.StartOtaDownload(strPayload);
+      nextion.startOtaDownload(strPayload);
     }
   }
   else if (strTopic == (mqttCommandTopic + "/espupdate") || strTopic == (mqttGroupCommandTopic + "/espupdate"))
@@ -557,7 +557,7 @@ void mqttCallback(String &strTopic, String &strPayload)
   else if (strTopic == (mqttCommandTopic + "/lcdreboot") || strTopic == (mqttGroupCommandTopic + "/lcdreboot"))
   { // '[...]/device/command/lcdreboot' == reboot LCD panel)
     debug.printLn(F("MQTT: Rebooting LCD"));
-    nextion.Reset();
+    nextion.reset();
   }
   else if (strTopic == (mqttCommandTopic + "/factoryreset") || strTopic == (mqttGroupCommandTopic + "/factoryreset"))
   { // '[...]/device/command/factoryreset' == clear all saved settings)
@@ -574,43 +574,43 @@ void mqttCallback(String &strTopic, String &strPayload)
     beepCounter = mqqtvar3.toInt();
   }
   else if (strTopic.startsWith(mqttCommandTopic) && (strPayload == ""))
-  { // '[...]/device/command/p[1].b[4].txt' -m '' == nextion.GetAttr("p[1].b[4].txt")
+  { // '[...]/device/command/p[1].b[4].txt' -m '' == nextion.getAttr("p[1].b[4].txt")
     String subTopic = strTopic.substring(mqttCommandTopic.length() + 1);
     mqttGetSubtopic = "/" + subTopic;
-    nextion.GetAttr(subTopic);
+    nextion.getAttr(subTopic);
   }
   else if (strTopic.startsWith(mqttGroupCommandTopic) && (strPayload == ""))
-  { // '[...]/group/command/p[1].b[4].txt' -m '' == nextion.GetAttr("p[1].b[4].txt")
+  { // '[...]/group/command/p[1].b[4].txt' -m '' == nextion.getAttr("p[1].b[4].txt")
     String subTopic = strTopic.substring(mqttGroupCommandTopic.length() + 1);
     mqttGetSubtopic = "/" + subTopic;
-    nextion.GetAttr(subTopic);
+    nextion.getAttr(subTopic);
   }
   else if (strTopic.startsWith(mqttCommandTopic))
-  { // '[...]/device/command/p[1].b[4].txt' -m '"Lights On"' == nextion.SetAttr("p[1].b[4].txt", "\"Lights On\"")
+  { // '[...]/device/command/p[1].b[4].txt' -m '"Lights On"' == nextion.setAttr("p[1].b[4].txt", "\"Lights On\"")
     String subTopic = strTopic.substring(mqttCommandTopic.length() + 1);
-    nextion.SetAttr(subTopic, strPayload);
+    nextion.setAttr(subTopic, strPayload);
   }
   else if (strTopic.startsWith(mqttGroupCommandTopic))
-  { // '[...]/group/command/p[1].b[4].txt' -m '"Lights On"' == nextion.SetAttr("p[1].b[4].txt", "\"Lights On\"")
+  { // '[...]/group/command/p[1].b[4].txt' -m '"Lights On"' == nextion.setAttr("p[1].b[4].txt", "\"Lights On\"")
     String subTopic = strTopic.substring(mqttGroupCommandTopic.length() + 1);
-    nextion.SetAttr(subTopic, strPayload);
+    nextion.setAttr(subTopic, strPayload);
   }
   else if (strTopic == mqttLightBrightCommandTopic)
   { // change the brightness from the light topic
     int panelDim = map(strPayload.toInt(), 0, 255, 0, 100);
-    nextion.SetAttr("dim", String(panelDim));
-    nextion.SendCmd("dims=dim");
+    nextion.setAttr("dim", String(panelDim));
+    nextion.sendCmd("dims=dim");
     mqttClient.publish(mqttLightBrightStateTopic, strPayload);
   }
   else if (strTopic == mqttLightCommandTopic && strPayload == "OFF")
   { // set the panel dim OFF from the light topic, saving current dim level first
-    nextion.SendCmd("dims=dim");
-    nextion.SetAttr("dim", "0");
+    nextion.sendCmd("dims=dim");
+    nextion.setAttr("dim", "0");
     mqttClient.publish(mqttLightStateTopic, "OFF");
   }
   else if (strTopic == mqttLightCommandTopic && strPayload == "ON")
   { // set the panel dim ON from the light topic, restoring saved dim level
-    nextion.SendCmd("dim=dims");
+    nextion.sendCmd("dim=dims");
     mqttClient.publish(mqttLightStateTopic, "ON");
   }
   else if (strTopic == mqttStatusTopic && strPayload == "OFF")
@@ -669,9 +669,9 @@ void mqttStatusUpdate()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void espWifiSetup()
 { // Connect to WiFi
-  nextion.SendCmd("page 0");
-  nextion.SetAttr("p[0].b[1].font", "6");
-  nextion.SetAttr("p[0].b[1].txt", "\"WiFi Connecting...\\r " + String(WiFi.SSID()) + "\"");
+  nextion.sendCmd("page 0");
+  nextion.setAttr("p[0].b[1].font", "6");
+  nextion.setAttr("p[0].b[1].txt", "\"WiFi Connecting...\\r " + String(WiFi.SSID()) + "\"");
 
   WiFi.macAddress(espMac);            // Read our MAC address and save it to espMac
   WiFi.hostname(haspNode);            // Assign our hostname before connecting to WiFi
@@ -756,12 +756,12 @@ void espWifiSetup()
     }
   }
   // If you get here you have connected to WiFi
-  nextion.SetAttr("p[0].b[1].font", "6");
-  nextion.SetAttr("p[0].b[1].txt", "\"WiFi Connected!\\r " + String(WiFi.SSID()) + "\\rIP: " + WiFi.localIP().toString() + "\"");
+  nextion.setAttr("p[0].b[1].font", "6");
+  nextion.setAttr("p[0].b[1].txt", "\"WiFi Connected!\\r " + String(WiFi.SSID()) + "\\rIP: " + WiFi.localIP().toString() + "\"");
   debug.printLn(String(F("WIFI: Connected successfully and assigned IP: ")) + WiFi.localIP().toString());
   if (nextion.getActivePage())
   {
-    nextion.SendCmd("page " + String(nextion.getActivePage()));
+    nextion.sendCmd("page " + String(nextion.getActivePage()));
   }
 }
 
@@ -792,10 +792,10 @@ void espWifiConfigCallback(WiFiManager *myWiFiManager)
   { // for factory-reset system this will be called before display is responsive. give it a second.
     delay(10);
   }
-  nextion.SendCmd("page 0");
-  nextion.SetAttr("p[0].b[1].font", "6");
-  nextion.SetAttr("p[0].b[1].txt", "\" HASP WiFi Setup\\r AP: " + String(wifiConfigAP) + "\\rPassword: " + String(wifiConfigPass) + "\\r\\r\\r\\r\\r\\r\\r  http://192.168.4.1\"");
-  nextion.SendCmd("vis 3,1");
+  nextion.sendCmd("page 0");
+  nextion.setAttr("p[0].b[1].font", "6");
+  nextion.setAttr("p[0].b[1].txt", "\" HASP WiFi Setup\\r AP: " + String(wifiConfigAP) + "\\rPassword: " + String(wifiConfigPass) + "\\r\\r\\r\\r\\r\\r\\r  http://192.168.4.1\"");
+  nextion.sendCmd("vis 3,1");
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -807,17 +807,17 @@ void espSetupOta()
 
   ArduinoOTA.onStart([]() {
     debug.printLn(F("ESP OTA: update start"));
-    nextion.SendCmd("page 0");
-    nextion.SetAttr("p[0].b[1].txt", "\"ESP OTA Update\"");
+    nextion.sendCmd("page 0");
+    nextion.setAttr("p[0].b[1].txt", "\"ESP OTA Update\"");
   });
   ArduinoOTA.onEnd([]() {
-    nextion.SendCmd("page 0");
+    nextion.sendCmd("page 0");
     debug.printLn(F("ESP OTA: update complete"));
-    nextion.SetAttr("p[0].b[1].txt", "\"ESP OTA Update\\rComplete!\"");
+    nextion.setAttr("p[0].b[1].txt", "\"ESP OTA Update\\rComplete!\"");
     espReset();
   });
   ArduinoOTA.onProgress([](uint32_t progress, uint32_t total) {
-    nextion.SetAttr("p[0].b[1].txt", "\"ESP OTA Update\\rProgress: " + String(progress / (total / 100)) + "%\"");
+    nextion.setAttr("p[0].b[1].txt", "\"ESP OTA Update\\rProgress: " + String(progress / (total / 100)) + "%\"");
   });
   ArduinoOTA.onError([](ota_error_t error) {
     debug.printLn(String(F("ESP OTA: ERROR code ")) + String(error));
@@ -831,9 +831,9 @@ void espSetupOta()
       debug.printLn(F("ESP OTA: ERROR - Receive Failed"));
     else if (error == OTA_END_ERROR)
       debug.printLn(F("ESP OTA: ERROR - End Failed"));
-    nextion.SetAttr("p[0].b[1].txt", "\"ESP OTA FAILED\"");
+    nextion.setAttr("p[0].b[1].txt", "\"ESP OTA FAILED\"");
     delay(5000);
-    nextion.SendCmd("page " + String(nextion.getActivePage()));
+    nextion.sendCmd("page " + String(nextion.getActivePage()));
   });
   ArduinoOTA.begin();
   debug.printLn(F("ESP OTA: Over the Air firmware update ready"));
@@ -842,8 +842,8 @@ void espSetupOta()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void espStartOta(String espOtaUrl)
 { // Update ESP firmware from HTTP
-  nextion.SendCmd("page 0");
-  nextion.SetAttr("p[0].b[1].txt", "\"HTTP update\\rstarting...\"");
+  nextion.sendCmd("page 0");
+  nextion.setAttr("p[0].b[1].txt", "\"HTTP update\\rstarting...\"");
   WiFiUDP::stopAll(); // Keep mDNS responder from breaking things
 
   t_httpUpdate_return returnCode = ESPhttpUpdate.update(wifiClient, espOtaUrl);
@@ -851,21 +851,21 @@ void espStartOta(String espOtaUrl)
   {
   case HTTP_UPDATE_FAILED:
     debug.printLn("ESPFW: HTTP_UPDATE_FAILED error " + String(ESPhttpUpdate.getLastError()) + " " + ESPhttpUpdate.getLastErrorString());
-    nextion.SetAttr("p[0].b[1].txt", "\"HTTP Update\\rFAILED\"");
+    nextion.setAttr("p[0].b[1].txt", "\"HTTP Update\\rFAILED\"");
     break;
 
   case HTTP_UPDATE_NO_UPDATES:
     debug.printLn(F("ESPFW: HTTP_UPDATE_NO_UPDATES"));
-    nextion.SetAttr("p[0].b[1].txt", "\"HTTP Update\\rNo update\"");
+    nextion.setAttr("p[0].b[1].txt", "\"HTTP Update\\rNo update\"");
     break;
 
   case HTTP_UPDATE_OK:
     debug.printLn(F("ESPFW: HTTP_UPDATE_OK"));
-    nextion.SetAttr("p[0].b[1].txt", "\"HTTP Update\\rcomplete!\\r\\rRestarting.\"");
+    nextion.setAttr("p[0].b[1].txt", "\"HTTP Update\\rcomplete!\\r\\rRestarting.\"");
     espReset();
   }
   delay(5000);
-  nextion.SendCmd("page " + String(nextion.getActivePage()));
+  nextion.sendCmd("page " + String(nextion.getActivePage()));
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -878,7 +878,7 @@ void espReset()
     mqttClient.publish(mqttSensorTopic, "{\"status\": \"unavailable\"}", true, 1);
     mqttClient.disconnect();
   }
-  nextion.Reset();
+  nextion.reset();
   ESP.reset();
   delay(5000);
 }
@@ -1018,7 +1018,7 @@ void configSaveCallback()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void configSave()
 { // Save the custom parameters to config.json
-  nextion.SetAttr("p[0].b[1].txt", "\"Saving\\rconfig\"");
+  nextion.setAttr("p[0].b[1].txt", "\"Saving\\rconfig\"");
   debug.printLn(F("SPIFFS: Saving config"));
   DynamicJsonDocument jsonConfigValues(1024);
   jsonConfigValues["mqttServer"] = mqttServer;
@@ -1065,9 +1065,9 @@ void configSave()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void configClearSaved()
 { // Clear out all local storage
-  nextion.SetAttr("dims", "100");
-  nextion.SendCmd("page 0");
-  nextion.SetAttr("p[0].b[1].txt", "\"Resetting\\rsystem...\"");
+  nextion.setAttr("dims", "100");
+  nextion.sendCmd("page 0");
+  nextion.setAttr("p[0].b[1].txt", "\"Resetting\\rsystem...\"");
   debug.printLn(F("RESET: Formatting SPIFFS"));
   SPIFFS.format();
   debug.printLn(F("RESET: Clearing WiFiManager settings..."));
@@ -1079,7 +1079,7 @@ void configClearSaved()
   {
     EEPROM.write(i, 0);
   }
-  nextion.SetAttr("p[0].b[1].txt", "\"Rebooting\\rsystem...\"");
+  nextion.setAttr("p[0].b[1].txt", "\"Rebooting\\rsystem...\"");
   debug.printLn(F("RESET: Rebooting device"));
   espReset();
 }
@@ -1444,7 +1444,7 @@ void webHandleResetBacklight()
   httpMessage += FPSTR(HTTP_END);
   webServer.send(200, "text/html", httpMessage);
   debug.printLn(F("HTTP: Resetting backlight to 100%"));
-  nextion.SetAttr("dims", "100");
+  nextion.setAttr("dims", "100");
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1600,7 +1600,7 @@ void webHandleLcdUpload()
 
     Serial1.write(nextion.Suffix, sizeof(nextion.Suffix)); // Send empty command to LCD
     Serial1.flush();
-    nextion.HandleInput();
+    nextion.handleInput();
 
     String lcdOtaNextionCmd = "whmi-wri " + String(tftFileSize) + ",115200,0";
     debug.printLn(String(F("LCD OTA: Sending LCD upload command: ")) + lcdOtaNextionCmd);
@@ -1608,7 +1608,7 @@ void webHandleLcdUpload()
     Serial1.write(nextion.Suffix, sizeof(nextion.Suffix));
     Serial1.flush();
 
-    if (nextion.OtaResponse())
+    if (nextion.otaResponse())
     {
       debug.printLn(F("LCD OTA: LCD upload command accepted"));
     }
@@ -1661,7 +1661,7 @@ void webHandleLcdUpload()
         lcdOtaPartNum++;
         lcdOtaPercentComplete = (lcdOtaTransferred * 100) / tftFileSize;
         lcdOtaChunkCounter = 0;
-        if (nextion.OtaResponse())
+        if (nextion.otaResponse())
         {
           debug.printLn(String(F("LCD OTA: Part ")) + String(lcdOtaPartNum) + String(F(" OK, ")) + String(lcdOtaPercentComplete) + String(F("% complete")));
         }
@@ -1686,7 +1686,7 @@ void webHandleLcdUpload()
 
     if (lcdOtaTransferred >= tftFileSize)
     {
-      if (nextion.OtaResponse())
+      if (nextion.otaResponse())
       {
         debug.printLn(String(F("LCD OTA: Success, wrote ")) + String(lcdOtaTransferred) + " of " + String(tftFileSize) + " bytes.");
         webServer.sendHeader("Location", "/lcdOtaSuccess");
@@ -1719,7 +1719,7 @@ void webHandleLcdUpload()
   { // Upload completed
     if (lcdOtaTransferred >= tftFileSize)
     {
-      if (nextion.OtaResponse())
+      if (nextion.otaResponse())
       { // YAY WE DID IT
         debug.printLn(String(F("LCD OTA: Success, wrote ")) + String(lcdOtaTransferred) + " of " + String(tftFileSize) + " bytes.");
         webServer.sendHeader("Location", "/lcdOtaSuccess");
@@ -1849,7 +1849,7 @@ void webHandleLcdDownload()
   httpMessage += FPSTR(HTTP_END);
   webServer.send(200, "text/html", httpMessage);
 
-  nextion.StartOtaDownload(webServer.arg("lcdFirmware"));
+  nextion.startOtaDownload(webServer.arg("lcdFirmware"));
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1895,8 +1895,8 @@ void webHandleReboot()
   httpMessage += FPSTR(HTTP_END);
   webServer.send(200, "text/html", httpMessage);
   debug.printLn(F("RESET: Rebooting device"));
-  nextion.SendCmd("page 0");
-  nextion.SetAttr("p[0].b[1].txt", "\"Rebooting...\"");
+  nextion.sendCmd("page 0");
+  nextion.setAttr("p[0].b[1].txt", "\"Rebooting...\"");
   espReset();
 }
 
@@ -2061,7 +2061,7 @@ void handleTelnetClient()
       else if (telnetInputByte == 10)
       {                                          // We've caught a LF (DEC 10), send buffer contents to the Nextion
         telnetInputBuffer[telnetInputIndex] = 0; // null terminate our char array
-        nextion.SendCmd(String(telnetInputBuffer));
+        nextion.sendCmd(String(telnetInputBuffer));
         telnetInputIndex = 0;
       }
       else if (telnetInputIndex < telnetInputMax)

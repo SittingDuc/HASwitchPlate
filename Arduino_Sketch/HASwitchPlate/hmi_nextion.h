@@ -64,7 +64,8 @@ extern void espReset();
 
 
 // Ours. But can't be inside the class?
-static const uint8_t  maxCacheCount = 14;
+static const bool     useCache = false;    // when false, disable all the _pageCache code (be like the Upstream project)
+static const uint8_t  maxCacheCount = 14;  // or 18?
 static const uint16_t maxCacheSize = 2100; // 2047; // 18 of 3000 does crash = softloop. 13 of 2600 does too
 
 
@@ -118,12 +119,12 @@ class hmiNextionClass {
 
         while (!_lcdConnected && (millis() < 5000))
         { // Wait up to 5 seconds for serial input from LCD
-          HandleInput();
+          handleInput();
         }
         if (_lcdConnected)
         {
           debug.printLn(F("HMI: LCD responding, continuing program load"));
-            SendCmd("connect");
+            sendCmd("connect");
         }
         else
         {
@@ -134,14 +135,14 @@ class hmiNextionClass {
     ////////////////////////////////////////////////////////////////////////////////////////////////////
     void loop(void)
     { // called in loop to maintain all our things
-      if (HandleInput())
+      if (handleInput())
       { // Process user input from HMI
-        ProcessInput();
+        processInput();
       }
 
       if ((_lcdVersion < 1) && (millis() <= (_retryMax * CheckInterval)))
       { // Attempt to connect to LCD panel to collect model and version info during startup
-        Connect();
+        _connect();
       }
       else if ((_lcdVersion > 0) && (millis() <= (_retryMax * CheckInterval)) && !_startupCompleteFlag)
       { // We have LCD info, so trigger an update check + report
@@ -161,42 +162,7 @@ class hmiNextionClass {
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////
-    void Connect()
-    {
-        if ((millis() - _checkTimer) >= CheckInterval)
-        {
-            static uint32_t retryCount = 0;
-            if ((_model.length() == 0) && (retryCount < (_retryMax - 2)))
-            { // Try issuing the "connect" command a few times
-              debug.printLn(HMI, F("HMI: sending Nextion connect request"));
-              SendCmd("connect");
-              retryCount++;
-              _checkTimer = millis();
-            }
-            else if ((_model.length() == 0) && (retryCount < _retryMax))
-            { // If we still don't have model info, try to change nextion serial speed from 9600 to 115200
-              SetSpeed();
-              retryCount++;
-              debug.printLn(HMI, F("HMI: sending Nextion serial speed 115200 request"));
-              _checkTimer = millis();
-            }
-            else if ((_lcdVersion < 1) && (retryCount <= _retryMax))
-            {
-              if (_model.length() == 0)
-              { // one last hail mary, maybe the serial speed is set correctly now
-                  SendCmd("connect");
-              }
-              SendCmd("get " + _lcdVersionQuery);
-              _lcdVersionQueryFlag = true;
-              retryCount++;
-              debug.printLn(HMI, F("HMI: sending Nextion version query"));
-              _checkTimer = millis();
-            }
-        }
-    }
-
-    ////////////////////////////////////////////////////////////////////////////////////////////////////
-    void Reset()
+    void reset()
     {
       debug.printLn(F("HMI: Rebooting LCD"));
       digitalWrite(nextionResetPin, LOW);
@@ -212,14 +178,14 @@ class hmiNextionClass {
       _lcdConnected = false;
       while (!_lcdConnected && (millis() < (lcdResetTimer + lcdResetTimeout)))
       {
-        HandleInput();
+        handleInput();
       }
       if (_lcdConnected)
       {
         debug.printLn(F("HMI: Rebooting LCD completed"));
         if (_activePage)
         {
-          SendCmd("page " + String(_activePage));
+          sendCmd("page " + String(_activePage));
         }
       }
       else
@@ -229,210 +195,69 @@ class hmiNextionClass {
       mqttClient.publish(mqttStatusTopic, "OFF");
     }
 
-
     ////////////////////////////////////////////////////////////////////////////////////////////////////
-    void ReplayCmd(void)
-    {
-    //  debug.printLn(HMI,String(F("--- Entry Point Replay Cmd ")) + _activePage);
-    //  if( 1 == _activePage)
-    //  {
-    //    debug.printLn(HMI,String(F("--- Contents  ")) + _pageCache[_activePage]);
-    //  }
-      if( _activePage >= maxCacheCount )
-      {
-        debug.printLn(HMI, String(F("Cache cannot replay for high-order page: ")) + _activePage );
-        return;
-      }
-      // Do nothing if the cache is empty
-      if( _pageCache[_activePage] == NULL )
-      {
-        return;
-      }
-      // Do something if the cache is not.
-      //StaticJsonDocument<maxCacheSize> replayCommands;
-      DynamicJsonDocument replayCommands(maxCacheSize);
-      DeserializationError jsonError = deserializeJson(replayCommands, _pageCache[_activePage]);
-      if (jsonError)
-      { // Couldn't parse incoming JSON command
-        debug.printLn(HMI,String(F("HMI: [ERROR] Failed to replay cache on page change. Reported error: ")) + String(jsonError.c_str()));
-      }
-      else
-      {
-        // we saved ram by not storing the p[x]. text, so re-add it here
-        // can we do this with printf?
-        String preface=String("p[") + _activePage + String("].");
-        JsonObject replayObj = replayCommands.as<JsonObject>();
-        //JsonArray replayArray = replayCommands.as<JsonArray>();
-    //    if( 1 == _activePage )
-    //    {
-    //      debug.printLn(HMI,String(F("--- ah wea  ")) + replayCommands.size() + "  " + replayObj.size() + "  " + preface);
-    //    }
-        for (JsonPair keyValue : replayObj)
-        {
-          //String subsequent = replayCommands[idx];
-          String thiskey=keyValue.key().c_str();
-          String thisvalue=keyValue.value().as<char*>();
-          String resultant = preface + thiskey + "=" + thisvalue;
-    //      debug.printLn(HMI,String(F("HMI:  ")) + " " + resultant); // _sendCmd has a printf itself
-          _sendCmd(resultant);
-          delayMicroseconds(200); // Larger JSON objects can take a while to run through over serial,
-        }                         // give the ESP and Nextion a moment to deal with life
-      }
-    }
-
-    ////////////////////////////////////////////////////////////////////////////////////////////////////
-    void appendCmd(int page, String Cmd)
-    {
-    //  debug.printLn(HMI,String(F("aCmd ")) + page + "  " + Cmd);
-      // our input is like p[1].b[1].txt="Hello World"
-      // or p[20].b[13].pco=65535
-      // we save ram by not storing the page number text
-
-      if( page >= maxCacheCount )
-      {
-        debug.printLn(HMI,String(F("Cache not stored for high-order page: ")) + page );
-        return;
-      }
-
-      String object=getSubtringField(Cmd,'=',0);
-      String value=getSubtringField(Cmd,'=',1);
-
-      int nom = 0;
-      char buffer[maxCacheSize];
-
-      if( Cmd.charAt(4)==']' )
-      { // page 10-99
-        nom=6;
-      }
-      else
-      { // page 0-9
-        nom=5;
-      }
-      String pageFree =object.substring(nom);
-
-    //  debug.printLn(HMI,String(F("--- debug ---  ")) + pageFree + "   " + value);
-
-      // In the _pageCache[page], find pageFree entry and if it exists, replace it with pageFree+"="+value. If it does not exist, add it.
-      //StaticJsonDocument<maxCacheSize> cacheCommands;
-      DynamicJsonDocument cacheCommands(maxCacheSize);
-      if( _pageCache[page] != NULL)
-      {
-        DeserializationError jsonError = deserializeJson(cacheCommands, _pageCache[page]);
-        if (jsonError)
-        { // Couldn't parse incoming JSON command
-          debug.printLn(HMI,String(F("Internal: [ERROR] Failed to update cache. Reported error: ")) + String(jsonError.c_str()));
-          debug.printLn(HMI,String(F("Internal: [DEBUG] Input String was: >>")) + Cmd + String(F("<<, cache was >>")) + _pageCache[page] + String(F("<<")));
-          //
-          if( _pageCache[page] != NULL )
-          { // fragment memory!
-            free(_pageCache[page]);
-            _pageCache[page]=NULL;
-            _pageCacheLen[page]=0;
-          }
-          return;
-        }
-      }
-      cacheCommands[pageFree]=value;
-      int count=serializeJson(cacheCommands, buffer, maxCacheSize-1);
-      buffer[maxCacheSize-1]='\0'; // force null termination
-      int buflen=strlen(buffer);
-
-      if( count > 0 && buflen > _pageCacheLen[page] )
-      { // including when _pageCacheLen[page]==0
-        if( _pageCache[page] == NULL )
-        { // new malloc
-          _pageCache[page]=(char*)malloc( sizeof(char) * (buflen+1) );
-          if(_pageCache[page] == NULL)
-          { // oops
-            _pageCacheLen[page]=0;
-            debug.printLn(HMI,String(F("Internal: [ERROR] Failed to malloc cache, wanted "))+buflen);
-            return;
-          }
-        }
-        else
-        { // realloc
-          _pageCache[page]=(char*)realloc((void*)_pageCache[page], sizeof(char) * (buflen+1));
-          if(_pageCache[page] == NULL)
-          { // oops
-            _pageCacheLen[page]=0;
-            debug.printLn(HMI,String(F("Internal: [ERROR] Failed to realloc cache, was ")) + _pageCacheLen[page]);
-            return;
-          }
-        }
-        _pageCacheLen[page]=buflen+1;
-      }
-
-      if( count > 0 )
-      {
-        strncpy(_pageCache[page],buffer,buflen);
-        _pageCache[page][buflen]='\0'; // paranoia, force null termination
-      }
-
-      if( page == 1 )
-      { // More Debug
-    //    debug.printLn(HMI,String(F("---  ")) + _pageCache[page]);
-        debug.printLn(HMI,String(F("SYSTEM: Heap Status: ")) + String(ESP.getFreeHeap()) + String(F(" ")) + String(ESP.getHeapFragmentation()) + String(F("%")) );
-      }
-      // and garbage collect
-      //cacheCommands.clear();
-    }
-
-
-    ////////////////////////////////////////////////////////////////////////////////////////////////////
-    inline void SetAttr(String hmiAttribute, String hmiValue)
+    inline void setAttr(String hmiAttribute, String hmiValue)
     { // Set the value of a Nextion component attribute
-      SendCmd(hmiAttribute + "=" + hmiValue);
+      sendCmd(hmiAttribute + "=" + hmiValue);
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////
-    void GetAttr(String hmiAttribute)
+    void getAttr(String hmiAttribute)
     { // Get the value of a Nextion component attribute
       // This will only send the command to the panel requesting the attribute, the actual
-      // return of that value will be handled by ProcessInput and placed into mqttGetSubtopic
+      // return of that value will be handled by processInput and placed into mqttGetSubtopic
       Serial1.print("get " + hmiAttribute);
       Serial1.write(Suffix, sizeof(Suffix));
       debug.printLn(HMI,String(F("HMI OUT: 'get ")) + hmiAttribute + "'");
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////
-    void SendCmd(String Cmd)
-    { // maybe send a commmand to the panel
+    void sendCmd(String cmd)
+    {
+      if( !useCache )
+      { // No cache, just send all commands straight to the panel
+        _sendCmd(cmd);
+        return;
+      }
+
+      // Yes cache, only send some commands to the panel
+
       // p[1].b[1].text="Hello World"
-      if( Cmd.startsWith("p[") && (Cmd.charAt(3)==']' || Cmd.charAt(4)==']'))
+      if( cmd.startsWith("p[") && (cmd.charAt(3)==']' || cmd.charAt(4)==']'))
       {
         int tgtPage;
         // who wants to bet there is a cleaner way to turn p[0] to p[99] into integer 0 to 99?
-        if(Cmd.charAt(3)==']')
+        if(cmd.charAt(3)==']')
         {
-          tgtPage=(Cmd.charAt(2)-'0');
+          tgtPage=(cmd.charAt(2)-'0');
         }
         else
         {
-          tgtPage=((Cmd.charAt(2)-'0')*10) + (Cmd.charAt(3)-'0');
+          tgtPage=((cmd.charAt(2)-'0')*10) + (cmd.charAt(3)-'0');
         }
 
         // Always add the entry to the list
-        appendCmd(tgtPage,Cmd);
+        _appendCmd(tgtPage,cmd);
 
         // but only render it if the page is active, or the page is global
         if (tgtPage == _activePage || _pageIsGlobal[tgtPage])
         {
-          _sendCmd(Cmd);
+          _sendCmd(cmd);
         }
         // else
         // {
-          // debug.printLn(HMI,String(F("HMI Skip: ")) + Cmd);
+          // debug.printLn(HMI,String(F("HMI Skip: ")) + cmd);
         // }
 
       }
       else
-      { // not a button / attribute, send it through
-        _sendCmd(Cmd);
+      { // not a button / attribute, send it to the panel
+        _sendCmd(cmd);
       }
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////
-    void ParseJson(String &strPayload)
+    void parseJson(String &strPayload)
     { // Parse an incoming JSON array into individual Nextion commands
       if (strPayload.endsWith(",]"))
       { // Trailing null array elements are an artifact of older Home Assistant automations and need to
@@ -440,35 +265,24 @@ class hmiNextionClass {
         strPayload.remove(strPayload.length() - 2, 2);
         strPayload.concat("]");
       }
-      DynamicJsonDocument Commands(mqttMaxPacketSize + 1024);
-      DeserializationError jsonError = deserializeJson(Commands, strPayload);
+      DynamicJsonDocument commands(mqttMaxPacketSize + 1024);
+      DeserializationError jsonError = deserializeJson(commands, strPayload);
       if (jsonError)
       { // Couldn't parse incoming JSON command
         debug.printLn(HMI,String(F("MQTT: [ERROR] Failed to parse incoming JSON command with error: ")) + String(jsonError.c_str()));
       }
       else
       {
-        for (uint8_t i = 0; i < Commands.size(); i++)
+        for (uint8_t i = 0; i < commands.size(); i++)
         {
-          SendCmd(Commands[i]);
-          delayMicroseconds(200); // Larger JSON objects can take a while to run through over serial,
+          sendCmd(commands[i]);
+          delayMicroseconds(500); // Larger JSON objects can take a while to run through over serial,
         }                         // give the ESP and Nextion a moment to deal with life
       }
     }
-    ////////////////////////////////////////////////////////////////////////////////////////////////////
-    void SetSpeed()
-    {
-      debug.printLn(HMI,F("HMI: No Nextion response, attempting 9600bps connection"));
-      Serial1.begin(9600);
-      Serial1.write(Suffix, sizeof(Suffix));
-      Serial1.print("bauds=115200");
-      Serial1.write(Suffix, sizeof(Suffix));
-      Serial1.flush();
-      Serial1.begin(115200);
-    }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////
-    bool HandleInput()
+    bool handleInput()
     { // Handle incoming serial data from the Nextion panel
       // This will collect serial data from the panel and place it into the global buffer
       // _returnBuffer[_returnIndex]
@@ -476,13 +290,13 @@ class hmiNextionClass {
       // Return: false otherwise
       bool commandComplete = false;
       static int termByteCnt = 0;   // counter for our 3 consecutive 0xFFs
-      static String hmiDebug = "HMI IN: "; // assemble a string for debug output
+      static String hmiDebugMsg = "HMI IN: "; // assemble a string for debug output
 
       if (Serial.available())
       {
         _lcdConnected = true;
         uint8_t commandByte = Serial.read();
-        hmiDebug += (" 0x" + String(commandByte, HEX));
+        hmiDebugMsg += (" 0x" + String(commandByte, HEX));
         // check to see if we have one of 3 consecutive 0xFF which indicates the end of a command
         if (commandByte == 0xFF)
         {
@@ -502,14 +316,14 @@ class hmiNextionClass {
       }
       if (commandComplete)
       {
-        debug.printLn(HMI, hmiDebug);
-        hmiDebug = "HMI IN: ";
+        debug.printLn(HMI, hmiDebugMsg);
+        hmiDebugMsg = "HMI IN: ";
       }
       return commandComplete;
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////
-    void ProcessInput()
+    void processInput()
     { // Process incoming serial commands from the Nextion panel
       // Command reference: https://www.itead.cc/wiki/Nextion_Instruction_Set#Format_of_Device_Return_Data
       // tl;dr: command uint8_t, command data, 0xFF 0xFF 0xFF
@@ -550,7 +364,7 @@ class hmiNextionClass {
           // two-state buttons, etc, throws a 0x1A error for normal buttons which we'll catch and ignore
           mqttGetSubtopic = "/p[" + Page + "].b[" + ButtonID + "].val";
           mqttGetSubtopicJSON = "p[" + Page + "].b[" + ButtonID + "].val";
-          GetAttr("p[" + Page + "].b[" + ButtonID + "].val");
+          getAttr("p[" + Page + "].b[" + ButtonID + "].val");
         }
       }
       else if (_returnBuffer[0] == 0x66)
@@ -564,7 +378,7 @@ class hmiNextionClass {
         if ((Page != "0") || _reportPage0)
         { // If we have a new page AND ( (it's not "0") OR (we've set the flag to report 0 anyway) )
           _activePage = Page.toInt();
-          ReplayCmd();
+          _replayCmd();
           String mqttPageTopic = mqttStateTopic + "/page";
           debug.printLn(MQTT, String(F("MQTT OUT: '")) + mqttPageTopic + "' : '" + Page + "'");
           mqttClient.publish(mqttPageTopic, Page);
@@ -577,9 +391,9 @@ class hmiNextionClass {
         // Meaning: Coordinate (122,30), Touch Event: Press
         // issue  command "sendxy=1" to enable this output
         uint16_t xCoord = _returnBuffer[1];
-        xCoord = xCoord * 256 + _returnBuffer[2];
+        xCoord = (xCoord<<8) | _returnBuffer[2];
         uint16_t yCoord = _returnBuffer[3];
-        yCoord = yCoord * 256 + _returnBuffer[4];
+        yCoord = (yCoord<<8) | _returnBuffer[4];
         String xyCoord = String(xCoord) + ',' + String(yCoord);
         uint8_t TouchAction = _returnBuffer[5];
         if (TouchAction == 0x01)
@@ -627,9 +441,9 @@ class hmiNextionClass {
         // Example: 0x71 0x7B 0x00 0x00 0x00 0xFF 0xFF 0xFF
         // Meaning: Integer data, 123
         uint32_t getInt = _returnBuffer[4];
-        getInt = getInt * 256 + _returnBuffer[3];
-        getInt = getInt * 256 + _returnBuffer[2];
-        getInt = getInt * 256 + _returnBuffer[1];
+        getInt = (getInt << 8) | _returnBuffer[3];
+        getInt = (getInt << 8) | _returnBuffer[2];
+        getInt = (getInt << 8) | _returnBuffer[1];
         String getString = String(getInt);
         debug.printLn(HMI,String(F("HMI IN: [Int Return] '")) + getString + "'");
 
@@ -689,7 +503,7 @@ class hmiNextionClass {
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////
-    void StartOtaDownload(String otaUrl)
+    void startOtaDownload(String otaUrl)
     { // Upload firmware to the Nextion LCD via HTTP download
       // based in large part on code posted by indev2 here:
       // http://support.iteadstudio.com/support/discussions/topics/11000007686/page/2
@@ -733,14 +547,14 @@ class hmiNextionClass {
           WiFiClient *stream = lcdOtaHttp.getStreamPtr();      // get tcp stream
           Serial1.write(Suffix, sizeof(Suffix)); // Send empty command
           Serial1.flush();
-          HandleInput();
+          handleInput();
           String lcdOtaNextionCmd = "whmi-wri " + String(lcdOtaFileSize) + ",115200,0";
           debug.printLn(String(F("LCD OTA: Sending LCD upload command: ")) + lcdOtaNextionCmd);
           Serial1.print(lcdOtaNextionCmd);
           Serial1.write(Suffix, sizeof(Suffix));
           Serial1.flush();
 
-          if (OtaResponse())
+          if (otaResponse())
           {
             debug.printLn(F("LCD OTA: LCD upload command accepted."));
           }
@@ -781,7 +595,7 @@ class hmiNextionClass {
                 lcdOtaTransferred += lcdOtaChunkCounter;
                 lcdOtaPercentComplete = (lcdOtaTransferred * 100) / lcdOtaFileSize;
                 lcdOtaChunkCounter = 0;
-                if (OtaResponse())
+                if (otaResponse())
                 { // We've completed a chunk
                   debug.printLn(String(F("LCD OTA: Part ")) + String(lcdOtaPartNum) + String(F(" OK, ")) + String(lcdOtaPercentComplete) + String(F("% complete")));
                   lcdOtaTimer = millis();
@@ -812,7 +626,7 @@ class hmiNextionClass {
           }
           lcdOtaPartNum++;
           lcdOtaTransferred += lcdOtaChunkCounter;
-          if ((lcdOtaTransferred == lcdOtaFileSize) && OtaResponse())
+          if ((lcdOtaTransferred == lcdOtaFileSize) && otaResponse())
           {
             debug.printLn(String(F("LCD OTA: Success, wrote ")) + String(lcdOtaTransferred) + " of " + String(tftFileSize) + " bytes.");
             uint32_t lcdOtaDelay = millis();
@@ -839,7 +653,7 @@ class hmiNextionClass {
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////
-    bool OtaResponse()
+    bool otaResponse()
     { // Monitor the serial port for a 0x05 response within our timeout
 
       uint32_t nextionCommandTimeout = 2000;   // timeout for receiving termination string in milliseconds
@@ -867,6 +681,8 @@ class hmiNextionClass {
     ////////////////////////////////////////////////////////////////////////////////////////////////////
     void debug_page_cache(void)
     {
+      if( !useCache ) { return; }
+
       debug.printLn(String(F("")));
       for( int idx=0;idx<maxCacheCount;idx++) {
         debug.printLn(String(F("debug [")) + idx + String(F("]=")) + _pageCacheLen[idx] );
@@ -889,7 +705,7 @@ class hmiNextionClass {
       if (getActivePage() != page)
       { // Hass likes to send duplicate responses to things like page requests and there are no plans to fix that behavior, so try and track it locally
         _activePage=page;
-        SendCmd("page " + String(_activePage));
+        sendCmd("page " + String(_activePage));
       }
     }
 
@@ -940,10 +756,207 @@ class hmiNextionClass {
     //static char hopeless[maxCacheSize];  // debugging
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////
-    void _sendCmd(String Cmd)
+    void _sendCmd(String cmd)
     { // Send a raw command to the Nextion panel
-        Serial1.print(Cmd);
+        Serial1.print(cmd);
         Serial1.write(Suffix, sizeof(Suffix));
-        debug.printLn(HMI,String(F("HMI OUT: ")) + Cmd);
+        debug.printLn(HMI,String(F("HMI OUT: ")) + cmd);
     }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////
+    void _connect()
+    { // connect to the Nextion Panel
+        if ((millis() - _checkTimer) >= CheckInterval)
+        {
+            static uint32_t retryCount = 0;
+            if ((_model.length() == 0) && (retryCount < (_retryMax - 2)))
+            { // Try issuing the "connect" command a few times
+              debug.printLn(HMI, F("HMI: sending Nextion connect request"));
+              sendCmd("connect");
+              retryCount++;
+              _checkTimer = millis();
+            }
+            else if ((_model.length() == 0) && (retryCount < _retryMax))
+            { // If we still don't have model info, try to change nextion serial speed from 9600 to 115200
+              _setSpeed();
+              retryCount++;
+              debug.printLn(HMI, F("HMI: sending Nextion serial speed 115200 request"));
+              _checkTimer = millis();
+            }
+            else if ((_lcdVersion < 1) && (retryCount <= _retryMax))
+            {
+              if (_model.length() == 0)
+              { // one last hail mary, maybe the serial speed is set correctly now
+                  sendCmd("connect");
+              }
+              sendCmd("get " + _lcdVersionQuery);
+              _lcdVersionQueryFlag = true;
+              retryCount++;
+              debug.printLn(HMI, F("HMI: sending Nextion version query"));
+              _checkTimer = millis();
+            }
+        }
+    }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////
+    void _setSpeed()
+    { // Set the Nextion serial port speed
+      debug.printLn(HMI,F("HMI: No Nextion response, attempting 9600bps connection"));
+      Serial1.begin(9600);
+      Serial1.write(Suffix, sizeof(Suffix));
+      Serial1.print("bauds=115200");
+      Serial1.write(Suffix, sizeof(Suffix));
+      Serial1.flush();
+      Serial1.begin(115200);
+    }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////
+    void _replayCmd(void)
+    { // play entries from the cache to the panel
+      if( !useCache ) { return; }
+    //  debug.printLn(HMI,String(F("--- Entry Point Replay Cmd ")) + _activePage);
+    //  if( 1 == _activePage)
+    //  {
+    //    debug.printLn(HMI,String(F("--- Contents  ")) + _pageCache[_activePage]);
+    //  }
+      if( _activePage >= maxCacheCount )
+      {
+        debug.printLn(HMI, String(F("Cache cannot replay for high-order page: ")) + _activePage );
+        return;
+      }
+      // Do nothing if the cache is empty
+      if( _pageCache[_activePage] == NULL )
+      {
+        return;
+      }
+      // Do something if the cache is not.
+      //StaticJsonDocument<maxCacheSize> replayCommands;
+      DynamicJsonDocument replayCommands(maxCacheSize);
+      DeserializationError jsonError = deserializeJson(replayCommands, _pageCache[_activePage]);
+      if (jsonError)
+      { // Couldn't parse incoming JSON command
+        debug.printLn(HMI,String(F("HMI: [ERROR] Failed to replay cache on page change. Reported error: ")) + String(jsonError.c_str()));
+      }
+      else
+      {
+        // we saved ram by not storing the p[x]. text, so re-add it here
+        // can we do this with printf?
+        String preface=String("p[") + _activePage + String("].");
+        JsonObject replayObj = replayCommands.as<JsonObject>();
+        //JsonArray replayArray = replayCommands.as<JsonArray>();
+    //    if( 1 == _activePage )
+    //    {
+    //      debug.printLn(HMI,String(F("--- ah wea  ")) + replayCommands.size() + "  " + replayObj.size() + "  " + preface);
+    //    }
+        for (JsonPair keyValue : replayObj)
+        {
+          //String subsequent = replayCommands[idx];
+          String thiskey=keyValue.key().c_str();
+          String thisvalue=keyValue.value().as<char*>();
+          String resultant = preface + thiskey + "=" + thisvalue;
+    //      debug.printLn(HMI,String(F("HMI:  ")) + " " + resultant); // _sendCmd has a printf itself
+          _sendCmd(resultant);
+          delayMicroseconds(200); // Larger JSON objects can take a while to run through over serial,
+        }                         // give the ESP and Nextion a moment to deal with life
+      }
+    }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////
+    void _appendCmd(int page, String cmd)
+    { // add entries to the cache, and pass input that is unsupported or for the activePage to the panel too
+      if( !useCache ) { return; }
+    //  debug.printLn(HMI,String(F("aCmd ")) + page + "  " + cmd);
+      // our input is like p[1].b[1].txt="Hello World"
+      // or p[20].b[13].pco=65535
+      // we save ram by not storing the page number text
+
+      if( page >= maxCacheCount )
+      {
+        debug.printLn(HMI,String(F("Cache not stored for high-order page: ")) + page );
+        return;
+      }
+
+      String object=getSubtringField(cmd,'=',0);
+      String value=getSubtringField(cmd,'=',1);
+
+      int nom = 0;
+      char buffer[maxCacheSize];
+
+      if( cmd.charAt(4)==']' )
+      { // page 10-99
+        nom=6;
+      }
+      else
+      { // page 0-9
+        nom=5;
+      }
+      String pageFree =object.substring(nom);
+
+    //  debug.printLn(HMI,String(F("--- debug ---  ")) + pageFree + "   " + value);
+
+      // In the _pageCache[page], find pageFree entry and if it exists, replace it with pageFree+"="+value. If it does not exist, add it.
+      //StaticJsonDocument<maxCacheSize> cacheCommands;
+      DynamicJsonDocument cacheCommands(maxCacheSize);
+      if( _pageCache[page] != NULL)
+      {
+        DeserializationError jsonError = deserializeJson(cacheCommands, _pageCache[page]);
+        if (jsonError)
+        { // Couldn't parse incoming JSON command
+          debug.printLn(HMI,String(F("Internal: [ERROR] Failed to update cache. Reported error: ")) + String(jsonError.c_str()));
+          debug.printLn(HMI,String(F("Internal: [DEBUG] Input String was: >>")) + cmd + String(F("<<, cache was >>")) + _pageCache[page] + String(F("<<")));
+          //
+          if( _pageCache[page] != NULL )
+          { // fragment memory!
+            free(_pageCache[page]);
+            _pageCache[page]=NULL;
+            _pageCacheLen[page]=0;
+          }
+          return;
+        }
+      }
+      cacheCommands[pageFree]=value;
+      int count=serializeJson(cacheCommands, buffer, maxCacheSize-1);
+      buffer[maxCacheSize-1]='\0'; // force null termination
+      int buflen=strlen(buffer);
+
+      if( count > 0 && buflen > _pageCacheLen[page] )
+      { // including when _pageCacheLen[page]==0
+        if( _pageCache[page] == NULL )
+        { // new malloc
+          _pageCache[page]=(char*)malloc( sizeof(char) * (buflen+1) );
+          if(_pageCache[page] == NULL)
+          { // oops
+            _pageCacheLen[page]=0;
+            debug.printLn(HMI,String(F("Internal: [ERROR] Failed to malloc cache, wanted "))+buflen);
+            return;
+          }
+        }
+        else
+        { // realloc
+          _pageCache[page]=(char*)realloc((void*)_pageCache[page], sizeof(char) * (buflen+1));
+          if(_pageCache[page] == NULL)
+          { // oops
+            _pageCacheLen[page]=0;
+            debug.printLn(HMI,String(F("Internal: [ERROR] Failed to realloc cache, was ")) + _pageCacheLen[page]);
+            return;
+          }
+        }
+        _pageCacheLen[page]=buflen+1;
+      }
+
+      if( count > 0 )
+      {
+        strncpy(_pageCache[page],buffer,buflen);
+        _pageCache[page][buflen]='\0'; // paranoia, force null termination
+      }
+
+      if( page == 1 )
+      { // More Debug
+    //    debug.printLn(HMI,String(F("---  ")) + _pageCache[page]);
+        debug.printLn(HMI,String(F("SYSTEM: Heap Status: ")) + String(ESP.getFreeHeap()) + String(F(" ")) + String(ESP.getHeapFragmentation()) + String(F("%")) );
+      }
+      // and garbage collect
+      //cacheCommands.clear();
+    }
+
 };
