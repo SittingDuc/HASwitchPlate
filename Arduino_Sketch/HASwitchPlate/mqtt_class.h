@@ -15,33 +15,27 @@
 
 #include "settings.h"
 #include <Arduino.h>
-#include <MQTT.h>
-#include <ArduinoOTA.h>
 
-// Our internal signals
-
-const uint32_t mqttConnectTimeout = CONNECTION_TIMEOUT;       // Timeout for WiFi and MQTT connection attempts in seconds
+// Our internal constants
+static const uint32_t mqttConnectTimeout = CONNECTION_TIMEOUT;       // Timeout for WiFi and MQTT connection attempts in seconds
 const uint16_t mqttMaxPacketSize = MQTT_MAX_PACKET_SIZE;  // Size of buffer for incoming MQTT message
-
-
-// Ugly Ugly Ugly
-/*
-  void mqtt_callback(String &strTopic, String &strPayload)
-  {
-  mqtt.callback(strTopic, strPayload);
-  }
-*/
+//TODO: make other code use a class member instead of extern'ing this directly
 
 class MQTTClass {
 private:
 public:
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
   // constructor
   MQTTClass(void) { _alive = false; }
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
   // destructor
   ~MQTTClass(void) { _alive = false; }
 
-  void begin(void);
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+  void begin();
 
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
   void loop();
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////

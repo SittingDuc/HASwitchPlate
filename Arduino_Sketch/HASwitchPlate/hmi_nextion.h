@@ -15,29 +15,6 @@
 
 #include "settings.h"
 #include <Arduino.h>
-#include <ESP8266WebServer.h> // class ESP8266WebServer. TODO: pack into another class?
-
-
-//extern void debug.printLn(HMI,String debugText); // TODO: class me
-//extern void debugPrint(String debugText); // TODO: class me
-extern String getSubtringField(String data, char separator, int index); // TODO: class me
-extern String printHex8(String data, uint8_t length); // TODO: class me
-
-// Class These!
-extern bool     beepEnabled;                           // Keypress beep enabled
-extern uint32_t beepPrevMillis;                        // will store last time beep was updated
-extern uint32_t beepOnTime;                            // milliseconds of on-time for beep
-extern uint32_t beepOffTime;                           // milliseconds of off-time for beep
-extern bool     beepState;                             // beep currently engaged
-extern uint32_t beepCounter;                           // Count the number of beeps
-extern uint8_t  beepPin;                               // define beep pin output
-
-extern uint32_t tftFileSize;                           // Filesize for TFT firmware upload
-
-extern ESP8266WebServer webServer;
-extern bool updateCheck();
-extern void espReset();
-
 
 // Ours. But can't be inside the class?
 static const bool     useCache = false;    // when false, disable all the _pageCache code (be like the Upstream project)

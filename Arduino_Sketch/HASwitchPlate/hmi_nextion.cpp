@@ -13,10 +13,7 @@
 #include "hmi_nextion.h"
 #include <Arduino.h>
 #include <ArduinoJson.h>
-#include <ESP8266WebServer.h>
-#include <ESP8266WiFi.h>
 #include <ESP8266httpUpdate.h>
-#include <ESP8266HTTPUpdateServer.h>
 
 #include "debug.h"
 extern debugClass debug; // our debug Object, USB Serial and/or Telnet
@@ -24,10 +21,31 @@ extern debugClass debug; // our debug Object, USB Serial and/or Telnet
 #include "mqtt_class.h"
 extern MQTTClass mqtt;   // our MQTT Object
 
+#include "web_class.h"
+extern WebClass web; // our HTTP Object
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// TODO: Class These!
+extern String getSubtringField(String data, char separator, int index); // TODO: class me
+extern String printHex8(String data, uint8_t length); // TODO: class me
+extern bool updateCheck();
+extern void espReset();
+
+// TODO: Class These!
+extern bool     beepEnabled;                           // Keypress beep enabled
+extern uint32_t beepPrevMillis;                        // will store last time beep was updated
+extern uint32_t beepOnTime;                            // milliseconds of on-time for beep
+extern uint32_t beepOffTime;                           // milliseconds of off-time for beep
+extern bool     beepState;                             // beep currently engaged
+extern uint32_t beepCounter;                           // Count the number of beeps
+extern uint8_t  beepPin;                               // define beep pin output
+extern uint32_t tftFileSize;                           // Filesize for TFT firmware upload
+
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void hmiNextionClass::begin(void)
-{ // called on setup to initialise all our things
+{  // called in the main code setup, handles our initialisation
   _alive               = true;
   _startupCompleteFlag = false;
   _checkTimer          = 0;
@@ -65,7 +83,7 @@ void hmiNextionClass::begin(void)
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void hmiNextionClass::loop(void)
-{ // called in loop to maintain all our things
+{ // called in the main code loop, handles our periodic code
   if (handleInput())
   { // Process user input from HMI
     processInput();
@@ -94,7 +112,7 @@ void hmiNextionClass::loop(void)
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void hmiNextionClass::reset()
-{
+{ // reset the LCD (often by denying power to the display)
   debug.printLn(F("HMI: Rebooting LCD"));
   digitalWrite(_resetPin, LOW);
   Serial1.print("rest"); // yes "rest", not "reset"
@@ -127,8 +145,9 @@ void hmiNextionClass::reset()
     
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void hmiNextionClass::initResetPin()
-{
+{ // Initialise the Reset Pin and set it High so the LCD gets power
   _resetPin = NEXTION_RESET_PIN;
   pinMode(_resetPin, OUTPUT);
   digitalWrite(_resetPin, HIGH);
@@ -547,7 +566,7 @@ void hmiNextionClass::startOtaDownload(String otaUrl)
         uint32_t lcdOtaDelay = millis();
         while ((millis() - lcdOtaDelay) < 5000)
         { // extra 5sec delay while the LCD handles any local firmware updates from new versions of code sent to it
-          webServer.handleClient();
+          web.loop();
           delay(1);
         }
         espReset();

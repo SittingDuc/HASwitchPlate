@@ -23,9 +23,13 @@ extern debugClass debug; // our serial debug interface
 #include "hmi_nextion.h" // circular?
 extern hmiNextionClass nextion;  // our LCD Object
 
-// TODO class me!
+#include "web_class.h"
+extern WebClass web; // our HTTP Object
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// TODO: Class These!
 const float haspVersion = HASP_VERSION;              // Current HASP software release version
-//extern const float haspVersion;                    // Current HASP software release version
 extern uint8_t espMac[6];                          // Byte array to store our MAC address
 extern String lcdFirmwareUrl;                      // Default link to compiled Nextion firmware images
 extern String espFirmwareUrl;                      // Default link to compiled Arduino firmware image
@@ -37,12 +41,27 @@ extern char mqttUser[32];
 extern char mqttPassword[32];
 extern char haspNode[16];
 extern char groupName[16];
+extern bool     beepEnabled;                           // Keypress beep enabled
+extern uint32_t beepPrevMillis;                        // will store last time beep was updated
+extern uint32_t beepOnTime;                            // milliseconds of on-time for beep
+extern uint32_t beepOffTime;                           // milliseconds of off-time for beep
+extern bool     beepState;                             // beep currently engaged
+extern uint32_t beepCounter;                           // Count the number of beeps
+extern uint8_t  beepPin;                               // define beep pin output
+extern uint32_t tftFileSize;                           // Filesize for TFT firmware upload
 
-
+// TODO: Class These!
+extern String getSubtringField(String data, char separator, int index); // TODO: class me
+extern String printHex8(String data, uint8_t length); // TODO: class me
+extern bool updateCheck();
+extern void espReset();
 extern void espStartOta(String espOtaUrl);
 extern void configClearSaved();
 
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // Our internal objects
+// TODO: can these go into our class?
 
 WiFiClient wifiMQTTClient;                 // client for MQTT
 MQTTClient mqttClient(mqttMaxPacketSize);  // MQTT Object
@@ -60,8 +79,9 @@ void mqtt_callback(String &strTopic, String &strPayload)
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void MQTTClass::begin(void)
-{
+void MQTTClass::begin()
+{ // called in the main code setup, handles our initialisation
+  _alive=true;
   _statusUpdateTimer = 0;
   mqttClient.begin(mqttServer, atoi(mqttPort), wifiMQTTClient); // Create MQTT service object
   mqttClient.onMessage(mqtt_callback);                          // Setup MQTT callback function
@@ -70,7 +90,7 @@ void MQTTClass::begin(void)
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void MQTTClass::loop()
-{
+{ // called in the main code loop, handles our periodic code
   if (!mqttClient.connected())
   { // Check MQTT connection
     debug.printLn("MQTT: not connected, connecting.");
@@ -106,7 +126,7 @@ void MQTTClass::connect()
       { // Process user input from HMI
         nextion.processInput();
       }
-      webServer.handleClient();
+      web.loop();
       ArduinoOTA.handle(); // TODO: move this elsewhere!
     }
   }
@@ -212,7 +232,7 @@ void MQTTClass::connect()
         { // Process user input from HMI
           nextion.processInput();
         }
-        webServer.handleClient();
+        web.loop();
         ArduinoOTA.handle();
         delay(10);
       }
