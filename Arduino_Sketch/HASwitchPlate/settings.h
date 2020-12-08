@@ -11,22 +11,24 @@
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // OPTIONAL: Assign default values here.
-char wifiSSID[32] = ""; // Leave unset for wireless autoconfig. Note that these values will be lost
-char wifiPass[64] = ""; // when updating, but that's probably OK because they will be saved in EEPROM.
+#define DEFAULT_WIFI_SSID ("") // Leave unset for wireless autoconfig. Note that these values will be lost
+
+#define DEFAULT_WIFI_PASS ("") // when updating, but that's probably OK because they will be saved in EEPROM.
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // These defaults may be overwritten with values saved by the web interface
 // Note that MQTT prefers dotted quad address, but MQTTS prefers fully qualified domain names (fqdn)
 // Note that MQTTS works best using NTP to obtain Time
-char mqttServer[64] = "";
-char mqttPort[6] = "1883";
-char mqttUser[32] = "";
-char mqttPassword[32] = "";
-char haspNode[16] = "plate01";
-char groupName[16] = "plates";
-char configUser[32] = "admin";
-char configPassword[32] = "";
-char motionPinConfig[3] = "0";
+#define DEFAULT_MQTT_SERVER ("")
+#define DEFAULT_MQTT_PORT ("1883")
+#define DEFAULT_MQTT_USER ("")
+#define DEFAULT_MQTT_PASS ("")
+#define DEFAULT_HASP_NODE ("plate01")
+#define DEFAULT_GROUP_NAME ("plates")
+#define DEFAULT_CONFIG_USER ("admin")
+#define DEFAULT_CONFIG_PASS ("")
+#define DEFAULT_MOTION_PIN ("0")
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #define ASECOND (1000)
@@ -45,6 +47,7 @@ char motionPinConfig[3] = "0";
 #define NEXTION_REPORT_PAGE0 (false)       // If false, don't report page 0 sendme
 #define NEXTION_RETRY_MAX (5)              // Attempt to connect to panel this many times
 #define NEXTION_CHECK_INTERVAL (5*ASECOND) // Time in msec between nextion connection checks
+#define NEXTION_RESET_PIN (D6)             // Pin for Nextion power rail switch (GPIO12/D6)
 
 #define MQTT_MAX_PACKET_SIZE (4096)             // Size of buffer for incoming MQTT message
 #define MQTT_STATUS_UPDATE_INTERVAL (5*AMINUTE) // Time in msec between publishing MQTT status updates (5 minutes)
