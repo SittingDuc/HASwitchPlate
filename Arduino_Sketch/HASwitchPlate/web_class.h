@@ -82,5 +82,6 @@ public:
 protected:
   bool _alive;
 
+  bool _authenticated(void);
   
 };

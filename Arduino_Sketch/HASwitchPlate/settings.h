@@ -56,6 +56,8 @@
 #define MOTION_BUFFER_TIMEOUT (1*ASECOND) // Latch time for motion sensor
 
 #define BEEP_DEFAULT_TIME (1*ASECOND) // milliseconds of on-time and off-time for beep
+#define BEEP_PIN (D2)                 // Pin for the Speaker, if fitted (GPIO4/D2). Must be AnalogWrite capable.
+#define BEEP_ENABLED (false)          // if true, enable the Speaker on BEEP_PIN
 
 #define DEBUG_HMI_VERBOSE (true)     // set false to have fewer printf from HMI/Nextion
 #define DEBUG_MQTT_VERBOSE (true)    // set false to have fewer printf from MQTT

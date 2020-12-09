@@ -21,16 +21,18 @@
 #include "debug.h"
 extern debugClass debug; // our serial debug interface
 
+#include "config_class.h"
+extern ConfigClass config; // our Configuration Container
+
 #include "hmi_nextion.h"
 extern hmiNextionClass nextion;  // our LCD Object
 
 #include "mqtt_class.h"
 extern MQTTClass mqtt; // our MQTT Object
 
+#include "speaker_class.h"
+extern SpeakerClass beep; // our Speaker Object
 
-// TODO: class these
-extern char wifiSSID[32]; // Leave unset for wireless autoconfig. Note that these values will be lost
-extern char wifiPass[64]; // when updating, but that's probably OK because they will be saved in EEPROM.
 
 const float haspVersion = HASP_VERSION;            // Current HASP software release version
 extern uint8_t espMac[6];                          // Byte array to store our MAC address
@@ -39,22 +41,12 @@ extern String espFirmwareUrl;                      // Default link to compiled A
 extern bool updateEspAvailable;                    // Flag for update check to report new ESP FW version
 extern float updateEspAvailableVersion;            // Float to hold the new ESP FW version number
 extern bool updateLcdAvailable;                    // Flag for update check to report new LCD FW version
-extern char mqttServer[64];
-extern char mqttPort[6];
-extern char mqttUser[32];
-extern char mqttPassword[32];
-extern char haspNode[16];
-extern char groupName[16];
-extern char motionPinConfig[3];
 extern bool shouldSaveConfig;                      // Flag to save json config to SPIFFS
 extern uint8_t motionPin;                          // GPIO input pin for motion sensor if connected and enabled
 extern bool mdnsEnabled;                           // mDNS enabled
 extern uint32_t updateLcdAvailableVersion;         // Int to hold the new LCD FW version number
-extern bool     beepEnabled;                           // Keypress beep enabled
 extern uint32_t tftFileSize;                           // Filesize for TFT firmware upload
 
-extern char configUser[32];
-extern char configPassword[32];
 extern void espReset();
 extern void configRead();
 extern void configSave();
@@ -142,9 +134,9 @@ void callback_HandleReboot()
 void WebClass::begin() 
 { // called in the main code setup, handles our initialisation
   _alive=true;
-  if ((configPassword[0] != '\0') && (configUser[0] != '\0'))
+  if ((config.getConfigPassword()[0] != '\0') && (config.getConfigUser()[0] != '\0'))
   { // Start the webserver with our assigned password if it's been configured...
-    httpOTAUpdate.setup(&webServer, "/update", configUser, configPassword);
+    httpOTAUpdate.setup(&webServer, "/update", config.getConfigUser(), config.getConfigPassword());
   }
   else
   { // or without a password if not
@@ -175,6 +167,21 @@ void WebClass::loop()
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+bool WebClass::_authenticated(void)
+{ // common code to verify our authentication on most handle callbacks
+  if (config.getConfigPassword()[0] != '\0')
+  { //Request HTTP auth if configPassword is set
+    if (!webServer.authenticate(config.getConfigUser(), config.getConfigPassword()))
+    {
+      webServer.requestAuthentication();
+      return false;
+    }
+  }
+  // authentication passes or not required
+  return true;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void WebClass::_handleNotFound()
 { // webServer 404
   debug.printLn(String(F("HTTP: Sending 404 to client connected from: ")) + webServer.client().remoteIP().toString());
@@ -196,40 +203,35 @@ void WebClass::_handleNotFound()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void WebClass::_handleRoot()
 { // http://plate01/
-  if (configPassword[0] != '\0')
-  { //Request HTTP auth if configPassword is set
-    if (!webServer.authenticate(configUser, configPassword))
-    {
-      return webServer.requestAuthentication();
-    }
-  }
+  if( !_authenticated() ) { return; }
+
   debug.printLn(String(F("HTTP: Sending root page to client connected from: ")) + webServer.client().remoteIP().toString());
   String httpMessage = FPSTR(HTTP_HEADER);
-  httpMessage.replace("{v}", String(haspNode));
+  httpMessage.replace("{v}", String(config.getHaspNode()));
   httpMessage += FPSTR(HTTP_SCRIPT);
   httpMessage += FPSTR(HTTP_STYLE);
   httpMessage += String(_haspStyle);
   httpMessage += FPSTR(HTTP_HEADER_END);
   httpMessage += String(F("<h1>"));
-  httpMessage += String(haspNode);
+  httpMessage += String(config.getHaspNode());
   httpMessage += String(F("</h1>"));
 
   httpMessage += String(F("<form method='POST' action='saveConfig'>"));
   httpMessage += String(F("<b>WiFi SSID</b> <i><small>(required)</small></i><input id='wifiSSID' required name='wifiSSID' maxlength=32 placeholder='WiFi SSID' value='")) + String(WiFi.SSID()) + "'>";
   httpMessage += String(F("<br/><b>WiFi Password</b> <i><small>(required)</small></i><input id='wifiPass' required name='wifiPass' type='password' maxlength=64 placeholder='WiFi Password' value='")) + String("********") + "'>";
-  httpMessage += String(F("<br/><br/><b>HASP Node Name</b> <i><small>(required. lowercase letters, numbers, and _ only)</small></i><input id='haspNode' required name='haspNode' maxlength=15 placeholder='HASP Node Name' pattern='[a-z0-9_]*' value='")) + String(haspNode) + "'>";
-  httpMessage += String(F("<br/><br/><b>Group Name</b> <i><small>(required)</small></i><input id='groupName' required name='groupName' maxlength=15 placeholder='Group Name' value='")) + String(groupName) + "'>";
-  httpMessage += String(F("<br/><br/><b>MQTT Broker</b> <i><small>(required)</small></i><input id='mqttServer' required name='mqttServer' maxlength=63 placeholder='mqttServer' value='")) + String(mqttServer) + "'>";
-  httpMessage += String(F("<br/><b>MQTT Port</b> <i><small>(required)</small></i><input id='mqttPort' required name='mqttPort' type='number' maxlength=5 placeholder='mqttPort' value='")) + String(mqttPort) + "'>";
-  httpMessage += String(F("<br/><b>MQTT User</b> <i><small>(optional)</small></i><input id='mqttUser' name='mqttUser' maxlength=31 placeholder='mqttUser' value='")) + String(mqttUser) + "'>";
+  httpMessage += String(F("<br/><br/><b>HASP Node Name</b> <i><small>(required. lowercase letters, numbers, and _ only)</small></i><input id='haspNode' required name='haspNode' maxlength=15 placeholder='HASP Node Name' pattern='[a-z0-9_]*' value='")) + String(config.getHaspNode()) + "'>";
+  httpMessage += String(F("<br/><br/><b>Group Name</b> <i><small>(required)</small></i><input id='groupName' required name='groupName' maxlength=15 placeholder='Group Name' value='")) + String(config.getGroupName()) + "'>";
+  httpMessage += String(F("<br/><br/><b>MQTT Broker</b> <i><small>(required)</small></i><input id='mqttServer' required name='mqttServer' maxlength=63 placeholder='mqttServer' value='")) + String(config.getMQTTServer()) + "'>";
+  httpMessage += String(F("<br/><b>MQTT Port</b> <i><small>(required)</small></i><input id='mqttPort' required name='mqttPort' type='number' maxlength=5 placeholder='mqttPort' value='")) + String(config.getMQTTPort()) + "'>";
+  httpMessage += String(F("<br/><b>MQTT User</b> <i><small>(optional)</small></i><input id='mqttUser' name='mqttUser' maxlength=31 placeholder='mqttUser' value='")) + String(config.getMQTTUser()) + "'>";
   httpMessage += String(F("<br/><b>MQTT Password</b> <i><small>(optional)</small></i><input id='mqttPassword' name='mqttPassword' type='password' maxlength=31 placeholder='mqttPassword' value='"));
-  if (strlen(mqttPassword) != 0)
+  if (strlen(config.getMQTTPassword()) != 0)
   {
     httpMessage += String("********");
   }
-  httpMessage += String(F("'><br/><br/><b>HASP Admin Username</b> <i><small>(optional)</small></i><input id='configUser' name='configUser' maxlength=31 placeholder='Admin User' value='")) + String(configUser) + "'>";
+  httpMessage += String(F("'><br/><br/><b>HASP Admin Username</b> <i><small>(optional)</small></i><input id='configUser' name='configUser' maxlength=31 placeholder='Admin User' value='")) + String(config.getConfigUser()) + "'>";
   httpMessage += String(F("<br/><b>HASP Admin Password</b> <i><small>(optional)</small></i><input id='configPassword' name='configPassword' type='password' maxlength=31 placeholder='Admin User Password' value='"));
-  if (strlen(configPassword) != 0)
+  if (strlen(config.getConfigPassword()) != 0)
   {
     httpMessage += String("********");
   }
@@ -268,7 +270,7 @@ void WebClass::_handleRoot()
   }
 
   httpMessage += String(F("><br/><b>Keypress beep enabled:</b><input id='beepEnabled' name='beepEnabled' type='checkbox'"));
-  if (beepEnabled)
+  if (beep.getEnable())
   {
     httpMessage += String(F(" checked='checked'"));
   }
@@ -327,16 +329,11 @@ void WebClass::_handleRoot()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void WebClass::_handleSaveConfig()
 { // http://plate01/saveConfig
-  if (configPassword[0] != '\0')
-  { //Request HTTP auth if configPassword is set
-    if (!webServer.authenticate(configUser, configPassword))
-    {
-      return webServer.requestAuthentication();
-    }
-  }
+  if( !_authenticated() ) { return; }
+
   debug.printLn(String(F("HTTP: Sending /saveConfig page to client connected from: ")) + webServer.client().remoteIP().toString());
   String httpMessage = FPSTR(HTTP_HEADER);
-  httpMessage.replace("{v}", String(haspNode));
+  httpMessage.replace("{v}", String(config.getHaspNode()));
   httpMessage += FPSTR(HTTP_SCRIPT);
   httpMessage += FPSTR(HTTP_STYLE);
   httpMessage += String(_haspStyle);
@@ -347,59 +344,59 @@ void WebClass::_handleSaveConfig()
   { // Handle WiFi update
     shouldSaveConfig = true;
     shouldSaveWifi = true;
-    webServer.arg("wifiSSID").toCharArray(wifiSSID, 32);
+    webServer.arg("wifiSSID").toCharArray(config.getWIFISSID(), 32);
     if (webServer.arg("wifiPass") != String("********"))
     {
-      webServer.arg("wifiPass").toCharArray(wifiPass, 64);
+      webServer.arg("wifiPass").toCharArray(config.getWIFIPass(), 64);
     }
   }
-  if (webServer.arg("mqttServer") != "" && webServer.arg("mqttServer") != String(mqttServer))
+  if (webServer.arg("mqttServer") != "" && webServer.arg("mqttServer") != String(config.getMQTTServer()))
   { // Handle mqttServer
     shouldSaveConfig = true;
-    webServer.arg("mqttServer").toCharArray(mqttServer, 64);
+    webServer.arg("mqttServer").toCharArray(config.getMQTTServer(), 64);
   }
-  if (webServer.arg("mqttPort") != "" && webServer.arg("mqttPort") != String(mqttPort))
+  if (webServer.arg("mqttPort") != "" && webServer.arg("mqttPort") != String(config.getMQTTPort()))
   { // Handle mqttPort
     shouldSaveConfig = true;
-    webServer.arg("mqttPort").toCharArray(mqttPort, 6);
+    webServer.arg("mqttPort").toCharArray(config.getMQTTPort(), 6);
   }
-  if (webServer.arg("haspNode") != "" && webServer.arg("haspNode") != String(haspNode))
+  if (webServer.arg("haspNode") != "" && webServer.arg("haspNode") != String(config.getHaspNode()))
   { // Handle haspNode
     shouldSaveConfig = true;
     String lowerHaspNode = webServer.arg("haspNode");
     lowerHaspNode.toLowerCase();
-    lowerHaspNode.toCharArray(haspNode, 16);
+    lowerHaspNode.toCharArray(config.getHaspNode(), 16);
   }
-  if (webServer.arg("groupName") != "" && webServer.arg("groupName") != String(groupName))
+  if (webServer.arg("groupName") != "" && webServer.arg("groupName") != String(config.getGroupName()))
   { // Handle groupName
     shouldSaveConfig = true;
-    webServer.arg("groupName").toCharArray(groupName, 16);
+    webServer.arg("groupName").toCharArray(config.getGroupName(), 16);
   }
   // Check optional values
-  if (webServer.arg("mqttUser") != String(mqttUser))
+  if (webServer.arg("mqttUser") != String(config.getMQTTUser()))
   { // Handle mqttUser
     shouldSaveConfig = true;
-    webServer.arg("mqttUser").toCharArray(mqttUser, 32);
+    webServer.arg("mqttUser").toCharArray(config.getMQTTUser(), 32);
   }
   if (webServer.arg("mqttPassword") != String("********"))
   { // Handle mqttPassword
     shouldSaveConfig = true;
-    webServer.arg("mqttPassword").toCharArray(mqttPassword, 32);
+    webServer.arg("mqttPassword").toCharArray(config.getMQTTPassword(), 32);
   }
-  if (webServer.arg("configUser") != String(configUser))
+  if (webServer.arg("configUser") != String(config.getConfigUser()))
   { // Handle configUser
     shouldSaveConfig = true;
-    webServer.arg("configUser").toCharArray(configUser, 32);
+    webServer.arg("configUser").toCharArray(config.getConfigUser(), 32);
   }
   if (webServer.arg("configPassword") != String("********"))
   { // Handle configPassword
     shouldSaveConfig = true;
-    webServer.arg("configPassword").toCharArray(configPassword, 32);
+    webServer.arg("configPassword").toCharArray(config.getConfigPassword(), 32);
   }
-  if (webServer.arg("motionPinConfig") != String(motionPinConfig))
+  if (webServer.arg("motionPinConfig") != String(config.getMotionPin()))
   { // Handle motionPinConfig
     shouldSaveConfig = true;
-    webServer.arg("motionPinConfig").toCharArray(motionPinConfig, 3);
+    webServer.arg("motionPinConfig").toCharArray(config.getMotionPin(), 3);
   }
   if ((webServer.arg("debugSerialEnabled") == String("on")) && !debug.getSerialEnabled())
   { // debugSerialEnabled was disabled but should now be enabled
@@ -431,22 +428,22 @@ void WebClass::_handleSaveConfig()
     shouldSaveConfig = true;
     mdnsEnabled = false;
   }
-  if ((webServer.arg("beepEnabled") == String("on")) && !beepEnabled)
+  if ((webServer.arg("beepEnabled") == String("on")) && !beep.getEnable())
   { // beepEnabled was disabled but should now be enabled
     shouldSaveConfig = true;
-    beepEnabled = true;
+    beep.enable(true);
   }
-  else if ((webServer.arg("beepEnabled") == String("")) && beepEnabled)
+  else if ((webServer.arg("beepEnabled") == String("")) && beep.getEnable())
   { // beepEnabled was enabled but should now be disabled
     shouldSaveConfig = true;
-    beepEnabled = false;
+    beep.enable(true);
   }
 
   if (shouldSaveConfig)
   { // Config updated, notify user and trigger write to SPIFFS
     httpMessage += String(F("<meta http-equiv='refresh' content='15;url=/' />"));
     httpMessage += FPSTR(HTTP_HEADER_END);
-    httpMessage += String(F("<h1>")) + String(haspNode) + String(F("</h1>"));
+    httpMessage += String(F("<h1>")) + String(config.getHaspNode()) + String(F("</h1>"));
     httpMessage += String(F("<br/>Saving updated configuration values and restarting device"));
     httpMessage += FPSTR(HTTP_END);
     webServer.send(200, "text/html", httpMessage);
@@ -463,7 +460,7 @@ void WebClass::_handleSaveConfig()
   { // No change found, notify user and link back to config page
     httpMessage += String(F("<meta http-equiv='refresh' content='3;url=/' />"));
     httpMessage += FPSTR(HTTP_HEADER_END);
-    httpMessage += String(F("<h1>")) + String(haspNode) + String(F("</h1>"));
+    httpMessage += String(F("<h1>")) + String(config.getHaspNode()) + String(F("</h1>"));
     httpMessage += String(F("<br/>No changes found, returning to <a href='/'>home page</a>"));
     httpMessage += FPSTR(HTTP_END);
     webServer.send(200, "text/html", httpMessage);
@@ -473,16 +470,11 @@ void WebClass::_handleSaveConfig()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void WebClass::_handleResetConfig()
 { // http://plate01/resetConfig
-  if (configPassword[0] != '\0')
-  { //Request HTTP auth if configPassword is set
-    if (!webServer.authenticate(configUser, configPassword))
-    {
-      return webServer.requestAuthentication();
-    }
-  }
+  if( !_authenticated() ) { return; }
+
   debug.printLn(String(F("HTTP: Sending /resetConfig page to client connected from: ")) + webServer.client().remoteIP().toString());
   String httpMessage = FPSTR(HTTP_HEADER);
-  httpMessage.replace("{v}", String(haspNode));
+  httpMessage.replace("{v}", String(config.getHaspNode()));
   httpMessage += FPSTR(HTTP_SCRIPT);
   httpMessage += FPSTR(HTTP_STYLE);
   httpMessage += String(_haspStyle);
@@ -491,7 +483,7 @@ void WebClass::_handleResetConfig()
   if (webServer.arg("confirm") == "yes")
   { // User has confirmed, so reset everything
     httpMessage += String(F("<h1>"));
-    httpMessage += String(haspNode);
+    httpMessage += String(config.getHaspNode());
     httpMessage += String(F("</h1><b>Resetting all saved settings and restarting device into WiFi AP mode</b>"));
     httpMessage += FPSTR(HTTP_END);
     webServer.send(200, "text/html", httpMessage);
@@ -513,23 +505,17 @@ void WebClass::_handleResetConfig()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void WebClass::_handleResetBacklight()
 { // http://plate01/resetBacklight
-  if (configPassword[0] != '\0')
-  { //Request HTTP auth if configPassword is set
-    if (!webServer.authenticate(configUser, configPassword))
-    {
-      return webServer.requestAuthentication();
-    }
-  }
+  if( !_authenticated() ) { return; }
 
   debug.printLn(String(F("HTTP: Sending /resetBacklight page to client connected from: ")) + webServer.client().remoteIP().toString());
   String httpMessage = FPSTR(HTTP_HEADER);
-  httpMessage.replace("{v}", (String(haspNode) + " HASP backlight reset"));
+  httpMessage.replace("{v}", (String(config.getHaspNode()) + " HASP backlight reset"));
   httpMessage += FPSTR(HTTP_SCRIPT);
   httpMessage += FPSTR(HTTP_STYLE);
   httpMessage += String(_haspStyle);
   httpMessage += String(F("<meta http-equiv='refresh' content='3;url=/' />"));
   httpMessage += FPSTR(HTTP_HEADER_END);
-  httpMessage += String(F("<h1>")) + String(haspNode) + String(F("</h1>"));
+  httpMessage += String(F("<h1>")) + String(config.getHaspNode()) + String(F("</h1>"));
   httpMessage += String(F("<br/>Resetting backlight to 100%"));
   httpMessage += FPSTR(HTTP_END);
   webServer.send(200, "text/html", httpMessage);
@@ -540,21 +526,16 @@ void WebClass::_handleResetBacklight()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void WebClass::_handleFirmware()
 { // http://plate01/firmware
-  if (configPassword[0] != '\0')
-  { //Request HTTP auth if configPassword is set
-    if (!webServer.authenticate(configUser, configPassword))
-    {
-      return webServer.requestAuthentication();
-    }
-  }
+  if( !_authenticated() ) { return; }
+
   debug.printLn(String(F("HTTP: Sending /firmware page to client connected from: ")) + webServer.client().remoteIP().toString());
   String httpMessage = FPSTR(HTTP_HEADER);
-  httpMessage.replace("{v}", (String(haspNode) + " update"));
+  httpMessage.replace("{v}", (String(config.getHaspNode()) + " update"));
   httpMessage += FPSTR(HTTP_SCRIPT);
   httpMessage += FPSTR(HTTP_STYLE);
   httpMessage += String(_haspStyle);
   httpMessage += FPSTR(HTTP_HEADER_END);
-  httpMessage += String(F("<h1>")) + String(haspNode) + String(F(" firmware</h1>"));
+  httpMessage += String(F("<h1>")) + String(config.getHaspNode()) + String(F(" firmware</h1>"));
 
   // Display main firmware page
   // HTTPS Disabled pending resolution of issue: https://github.com/esp8266/Arduino/issues/4696
@@ -608,24 +589,18 @@ void WebClass::_handleFirmware()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void WebClass::_handleEspFirmware()
 { // http://plate01/espfirmware
-  if (configPassword[0] != '\0')
-  { //Request HTTP auth if configPassword is set
-    if (!webServer.authenticate(configUser, configPassword))
-    {
-      return webServer.requestAuthentication();
-    }
-  }
+  if( !_authenticated() ) { return; }
 
   debug.printLn(String(F("HTTP: Sending /espfirmware page to client connected from: ")) + webServer.client().remoteIP().toString());
   String httpMessage = FPSTR(HTTP_HEADER);
-  httpMessage.replace("{v}", (String(haspNode) + " ESP update"));
+  httpMessage.replace("{v}", (String(config.getHaspNode()) + " ESP update"));
   httpMessage += FPSTR(HTTP_SCRIPT);
   httpMessage += FPSTR(HTTP_STYLE);
   httpMessage += String(_haspStyle);
   httpMessage += String(F("<meta http-equiv='refresh' content='60;url=/' />"));
   httpMessage += FPSTR(HTTP_HEADER_END);
   httpMessage += String(F("<h1>"));
-  httpMessage += String(haspNode) + " ESP update";
+  httpMessage += String(config.getHaspNode()) + " ESP update";
   httpMessage += String(F("</h1>"));
   httpMessage += "<br/>Updating ESP firmware from: " + String(webServer.arg("espFirmware"));
   httpMessage += FPSTR(HTTP_END);
@@ -640,13 +615,7 @@ void WebClass::_handleLcdUpload()
 { // http://plate01/lcdupload
   // Upload firmware to the Nextion LCD via HTTP upload
 
-  if (configPassword[0] != '\0')
-  { //Request HTTP auth if configPassword is set
-    if (!webServer.authenticate(configUser, configPassword))
-    {
-      return webServer.requestAuthentication();
-    }
-  }
+  if( !_authenticated() ) { return; }
 
   static uint32_t lcdOtaTransferred = 0;
   static uint32_t lcdOtaRemaining;
@@ -660,13 +629,13 @@ void WebClass::_handleLcdUpload()
   {
     debug.printLn(String(F("LCD OTA: FAILED, no filesize sent.")));
     String httpMessage = FPSTR(HTTP_HEADER);
-    httpMessage.replace("{v}", (String(haspNode) + " LCD update"));
+    httpMessage.replace("{v}", (String(config.getHaspNode()) + " LCD update"));
     httpMessage += FPSTR(HTTP_SCRIPT);
     httpMessage += FPSTR(HTTP_STYLE);
     httpMessage += String(_haspStyle);
     httpMessage += String(F("<meta http-equiv='refresh' content='5;url=/' />"));
     httpMessage += FPSTR(HTTP_HEADER_END);
-    httpMessage += String(F("<h1>")) + String(haspNode) + " LCD update FAILED</h1>";
+    httpMessage += String(F("<h1>")) + String(config.getHaspNode()) + " LCD update FAILED</h1>";
     httpMessage += String(F("No update file size reported.  You must use a modern browser with Javascript enabled."));
     httpMessage += FPSTR(HTTP_END);
     webServer.send(200, "text/html", httpMessage);
@@ -870,22 +839,17 @@ void WebClass::_handleLcdUpload()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void WebClass::_handleLcdUpdateSuccess()
 { // http://plate01/lcdOtaSuccess
-  if (configPassword[0] != '\0')
-  { //Request HTTP auth if configPassword is set
-    if (!webServer.authenticate(configUser, configPassword))
-    {
-      return webServer.requestAuthentication();
-    }
-  }
+  if( !_authenticated() ) { return; }
+
   debug.printLn(String(F("HTTP: Sending /lcdOtaSuccess page to client connected from: ")) + webServer.client().remoteIP().toString());
   String httpMessage = FPSTR(HTTP_HEADER);
-  httpMessage.replace("{v}", (String(haspNode) + " LCD update success"));
+  httpMessage.replace("{v}", (String(config.getHaspNode()) + " LCD update success"));
   httpMessage += FPSTR(HTTP_SCRIPT);
   httpMessage += FPSTR(HTTP_STYLE);
   httpMessage += String(_haspStyle);
   httpMessage += String(F("<meta http-equiv='refresh' content='15;url=/' />"));
   httpMessage += FPSTR(HTTP_HEADER_END);
-  httpMessage += String(F("<h1>")) + String(haspNode) + String(F(" LCD update success</h1>"));
+  httpMessage += String(F("<h1>")) + String(config.getHaspNode()) + String(F(" LCD update success</h1>"));
   httpMessage += String(F("Restarting HASwitchPlate to apply changes..."));
   httpMessage += FPSTR(HTTP_END);
   webServer.send(200, "text/html", httpMessage);
@@ -894,22 +858,17 @@ void WebClass::_handleLcdUpdateSuccess()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void WebClass::_handleLcdUpdateFailure()
 { // http://plate01/lcdOtaFailure
-  if (configPassword[0] != '\0')
-  { //Request HTTP auth if configPassword is set
-    if (!webServer.authenticate(configUser, configPassword))
-    {
-      return webServer.requestAuthentication();
-    }
-  }
+  if( !_authenticated() ) { return; }
+
   debug.printLn(String(F("HTTP: Sending /lcdOtaFailure page to client connected from: ")) + webServer.client().remoteIP().toString());
   String httpMessage = FPSTR(HTTP_HEADER);
-  httpMessage.replace("{v}", (String(haspNode) + " LCD update failed"));
+  httpMessage.replace("{v}", (String(config.getHaspNode()) + " LCD update failed"));
   httpMessage += FPSTR(HTTP_SCRIPT);
   httpMessage += FPSTR(HTTP_STYLE);
   httpMessage += String(_haspStyle);
   httpMessage += String(F("<meta http-equiv='refresh' content='15;url=/' />"));
   httpMessage += FPSTR(HTTP_HEADER_END);
-  httpMessage += String(F("<h1>")) + String(haspNode) + String(F(" LCD update failed :(</h1>"));
+  httpMessage += String(F("<h1>")) + String(config.getHaspNode()) + String(F(" LCD update failed :(</h1>"));
   httpMessage += String(F("Restarting HASwitchPlate to reset device..."));
   httpMessage += FPSTR(HTTP_END);
   webServer.send(200, "text/html", httpMessage);
@@ -918,22 +877,17 @@ void WebClass::_handleLcdUpdateFailure()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void WebClass::_handleLcdDownload()
 { // http://plate01/lcddownload
-  if (configPassword[0] != '\0')
-  { //Request HTTP auth if configPassword is set
-    if (!webServer.authenticate(configUser, configPassword))
-    {
-      return webServer.requestAuthentication();
-    }
-  }
+  if( !_authenticated() ) { return; }
+
   debug.printLn(String(F("HTTP: Sending /lcddownload page to client connected from: ")) + webServer.client().remoteIP().toString());
   String httpMessage = FPSTR(HTTP_HEADER);
-  httpMessage.replace("{v}", (String(haspNode) + " LCD update"));
+  httpMessage.replace("{v}", (String(config.getHaspNode()) + " LCD update"));
   httpMessage += FPSTR(HTTP_SCRIPT);
   httpMessage += FPSTR(HTTP_STYLE);
   httpMessage += String(_haspStyle);
   httpMessage += FPSTR(HTTP_HEADER_END);
   httpMessage += String(F("<h1>"));
-  httpMessage += String(haspNode) + " LCD update";
+  httpMessage += String(config.getHaspNode()) + " LCD update";
   httpMessage += String(F("</h1>"));
   httpMessage += "<br/>Updating LCD firmware from: " + String(webServer.arg("lcdFirmware"));
   httpMessage += FPSTR(HTTP_END);
@@ -945,16 +899,11 @@ void WebClass::_handleLcdDownload()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void WebClass::_handleTftFileSize()
 { // http://plate01/tftFileSize
-  if (configPassword[0] != '\0')
-  { //Request HTTP auth if configPassword is set
-    if (!webServer.authenticate(configUser, configPassword))
-    {
-      return webServer.requestAuthentication();
-    }
-  }
+  if( !_authenticated() ) { return; }
+
   debug.printLn(String(F("HTTP: Sending /tftFileSize page to client connected from: ")) + webServer.client().remoteIP().toString());
   String httpMessage = FPSTR(HTTP_HEADER);
-  httpMessage.replace("{v}", (String(haspNode) + " TFT Filesize"));
+  httpMessage.replace("{v}", (String(config.getHaspNode()) + " TFT Filesize"));
   httpMessage += FPSTR(HTTP_HEADER_END);
   httpMessage += FPSTR(HTTP_END);
   webServer.send(200, "text/html", httpMessage);
@@ -965,22 +914,17 @@ void WebClass::_handleTftFileSize()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void WebClass::_handleReboot()
 { // http://plate01/reboot
-  if (configPassword[0] != '\0')
-  { //Request HTTP auth if configPassword is set
-    if (!webServer.authenticate(configUser, configPassword))
-    {
-      return webServer.requestAuthentication();
-    }
-  }
+  if( !_authenticated() ) { return; }
+
   debug.printLn(String(F("HTTP: Sending /reboot page to client connected from: ")) + webServer.client().remoteIP().toString());
   String httpMessage = FPSTR(HTTP_HEADER);
-  httpMessage.replace("{v}", (String(haspNode) + " HASP reboot"));
+  httpMessage.replace("{v}", (String(config.getHaspNode()) + " HASP reboot"));
   httpMessage += FPSTR(HTTP_SCRIPT);
   httpMessage += FPSTR(HTTP_STYLE);
   httpMessage += String(_haspStyle);
   httpMessage += String(F("<meta http-equiv='refresh' content='10;url=/' />"));
   httpMessage += FPSTR(HTTP_HEADER_END);
-  httpMessage += String(F("<h1>")) + String(haspNode) + String(F("</h1>"));
+  httpMessage += String(F("<h1>")) + String(config.getHaspNode()) + String(F("</h1>"));
   httpMessage += String(F("<br/>Rebooting device"));
   httpMessage += FPSTR(HTTP_END);
   webServer.send(200, "text/html", httpMessage);

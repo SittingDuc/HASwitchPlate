@@ -20,11 +20,17 @@
 #include "debug.h"
 extern debugClass debug; // our serial debug interface
 
+#include "config_class.h"
+extern ConfigClass config; // our Configuration Container
+
 #include "hmi_nextion.h" // circular?
 extern hmiNextionClass nextion;  // our LCD Object
 
 #include "web_class.h"
 extern WebClass web; // our HTTP Object
+
+#include "speaker_class.h"
+extern SpeakerClass beep; // our Speaker Object
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -35,19 +41,6 @@ extern String lcdFirmwareUrl;                      // Default link to compiled N
 extern String espFirmwareUrl;                      // Default link to compiled Arduino firmware image
 extern bool updateEspAvailable;                    // Flag for update check to report new ESP FW version
 extern bool updateLcdAvailable;                    // Flag for update check to report new LCD FW version
-extern char mqttServer[64];
-extern char mqttPort[6];
-extern char mqttUser[32];
-extern char mqttPassword[32];
-extern char haspNode[16];
-extern char groupName[16];
-extern bool     beepEnabled;                           // Keypress beep enabled
-extern uint32_t beepPrevMillis;                        // will store last time beep was updated
-extern uint32_t beepOnTime;                            // milliseconds of on-time for beep
-extern uint32_t beepOffTime;                           // milliseconds of off-time for beep
-extern bool     beepState;                             // beep currently engaged
-extern uint32_t beepCounter;                           // Count the number of beeps
-extern uint8_t  beepPin;                               // define beep pin output
 extern uint32_t tftFileSize;                           // Filesize for TFT firmware upload
 
 // TODO: Class These!
@@ -83,7 +76,7 @@ void MQTTClass::begin()
 { // called in the main code setup, handles our initialisation
   _alive=true;
   _statusUpdateTimer = 0;
-  mqttClient.begin(mqttServer, atoi(mqttPort), wifiMQTTClient); // Create MQTT service object
+  mqttClient.begin(config.getMQTTServer(), atoi(config.getMQTTPort()), wifiMQTTClient); // Create MQTT service object
   mqttClient.onMessage(mqtt_callback);                          // Setup MQTT callback function
   connect();                                                    // Connect to MQTT
 }
@@ -114,12 +107,12 @@ void MQTTClass::connect()
   // still running the sketch
 
   // Check to see if we have a broker configured and notify the user if not
-  if (mqttServer[0] == 0)
+  if (config.getMQTTServer()[0] == 0) // this check could be more elegant, eh?
   {
     nextion.sendCmd("page 0");
     nextion.setAttr("p[0].b[1].font", "6");
     nextion.setAttr("p[0].b[1].txt", "\"WiFi Connected!\\r " + String(WiFi.SSID()) + "\\rIP: " + WiFi.localIP().toString() + "\\r\\rConfigure MQTT:\\rhttp://" + WiFi.localIP().toString() + "\"");
-    while (mqttServer[0] == 0)
+    while (config.getMQTTServer()[0] == 0)
     { // Handle HTTP and OTA while we're waiting for MQTT to be configured
       yield();
       if (nextion.handleInput())
@@ -131,22 +124,22 @@ void MQTTClass::connect()
     }
   }
   // MQTT topic string definitions
-  _stateTopic = "hasp/" + String(haspNode) + "/state";
-  _stateJSONTopic = "hasp/" + String(haspNode) + "/state/json";
-  _commandTopic = "hasp/" + String(haspNode) + "/command";
-  _groupCommandTopic = "hasp/" + String(groupName) + "/command";
-  _statusTopic = "hasp/" + String(haspNode) + "/status";
-  _sensorTopic = "hasp/" + String(haspNode) + "/sensor";
-  _lightCommandTopic = "hasp/" + String(haspNode) + "/light/switch";
-  _lightStateTopic = "hasp/" + String(haspNode) + "/light/state";
-  _lightBrightCommandTopic = "hasp/" + String(haspNode) + "/brightness/set";
-  _lightBrightStateTopic = "hasp/" + String(haspNode) + "/brightness/state";
-  _motionStateTopic = "hasp/" + String(haspNode) + "/motion/state";
+  _stateTopic = "hasp/" + String(config.getHaspNode()) + "/state";
+  _stateJSONTopic = "hasp/" + String(config.getHaspNode()) + "/state/json";
+  _commandTopic = "hasp/" + String(config.getHaspNode()) + "/command";
+  _groupCommandTopic = "hasp/" + String(config.getGroupName()) + "/command";
+  _statusTopic = "hasp/" + String(config.getHaspNode()) + "/status";
+  _sensorTopic = "hasp/" + String(config.getHaspNode()) + "/sensor";
+  _lightCommandTopic = "hasp/" + String(config.getHaspNode()) + "/light/switch";
+  _lightStateTopic = "hasp/" + String(config.getHaspNode()) + "/light/state";
+  _lightBrightCommandTopic = "hasp/" + String(config.getHaspNode()) + "/brightness/set";
+  _lightBrightStateTopic = "hasp/" + String(config.getHaspNode()) + "/brightness/state";
+  _motionStateTopic = "hasp/" + String(config.getHaspNode()) + "/motion/state";
 
   const String commandSubscription = _commandTopic + "/#";
   const String groupCommandSubscription = _groupCommandTopic + "/#";
-  const String lightSubscription = "hasp/" + String(haspNode) + "/light/#";
-  const String lightBrightSubscription = "hasp/" + String(haspNode) + "/brightness/#";
+  const String lightSubscription = "hasp/" + String(config.getHaspNode()) + "/light/#";
+  const String lightBrightSubscription = "hasp/" + String(config.getHaspNode()) + "/brightness/#";
 
   // Loop until we're reconnected to MQTT
   while (!mqttClient.connected())
@@ -155,11 +148,11 @@ void MQTTClass::connect()
     static uint8_t mqttReconnectCount = 0;
 
     // Generate an MQTT client ID as haspNode + our MAC address
-    _clientId = String(haspNode) + "-" + String(espMac[0], HEX) + String(espMac[1], HEX) + String(espMac[2], HEX) + String(espMac[3], HEX) + String(espMac[4], HEX) + String(espMac[5], HEX);
+    _clientId = String(config.getHaspNode()) + "-" + String(espMac[0], HEX) + String(espMac[1], HEX) + String(espMac[2], HEX) + String(espMac[3], HEX) + String(espMac[4], HEX) + String(espMac[5], HEX);
     nextion.sendCmd("page 0");
     nextion.setAttr("p[0].b[1].font", "6");
-    nextion.setAttr("p[0].b[1].txt", "\"WiFi Connected!\\r " + String(WiFi.SSID()) + "\\rIP: " + WiFi.localIP().toString() + "\\r\\rMQTT Connecting:\\r " + String(mqttServer) + "\"");
-    debug.printLn(String(F("MQTT: Attempting connection to broker ")) + String(mqttServer) + " as clientID " + _clientId);
+    nextion.setAttr("p[0].b[1].txt", "\"WiFi Connected!\\r " + String(WiFi.SSID()) + "\\rIP: " + WiFi.localIP().toString() + "\\r\\rMQTT Connecting:\\r " + String(config.getMQTTServer()) + "\"");
+    debug.printLn(String(F("MQTT: Attempting connection to broker ")) + String(config.getMQTTServer()) + " as clientID " + _clientId);
 
     // Set keepAlive, cleanSession, timeout
     mqttClient.setOptions(30, true, 5000);
@@ -167,7 +160,7 @@ void MQTTClass::connect()
     // declare LWT
     mqttClient.setWill(_statusTopic.c_str(), "OFF");
 
-    if (mqttClient.connect(_clientId.c_str(), mqttUser, mqttPassword))
+    if (mqttClient.connect(_clientId.c_str(), config.getMQTTUser(), config.getMQTTPassword()))
     { // Attempt to connect to broker, setting last will and testament
       // Subscribe to our incoming topics
       if (mqttClient.subscribe(commandSubscription))
@@ -208,7 +201,7 @@ void MQTTClass::connect()
       mqttReconnectCount = 0;
 
       // Update panel with MQTT status
-      nextion.setAttr("p[0].b[1].txt", "\"WiFi Connected!\\r " + String(WiFi.SSID()) + "\\rIP: " + WiFi.localIP().toString() + "\\r\\rMQTT Connected:\\r " + String(mqttServer) + "\"");
+      nextion.setAttr("p[0].b[1].txt", "\"WiFi Connected!\\r " + String(WiFi.SSID()) + "\\rIP: " + WiFi.localIP().toString() + "\\r\\rMQTT Connected:\\r " + String(config.getMQTTServer()) + "\"");
       debug.printLn(F("MQTT: connected"));
       if (nextion.getActivePage())
       {
@@ -224,7 +217,7 @@ void MQTTClass::connect()
         espReset();
       }
       debug.printLn(String(F("MQTT connection attempt ")) + String(mqttReconnectCount) + String(F(" failed with rc ")) + String(mqttClient.returnCode()) + String(F(".  Trying again in 30 seconds.")));
-      nextion.setAttr("p[0].b[1].txt", "\"WiFi Connected:\\r " + String(WiFi.SSID()) + "\\rIP: " + WiFi.localIP().toString() + "\\r\\rMQTT Connect to:\\r " + String(mqttServer) + "\\rFAILED rc=" + String(mqttClient.returnCode()) + "\\r\\rRetry in 30 sec\"");
+      nextion.setAttr("p[0].b[1].txt", "\"WiFi Connected:\\r " + String(WiFi.SSID()) + "\\rIP: " + WiFi.localIP().toString() + "\\r\\rMQTT Connect to:\\r " + String(config.getMQTTServer()) + "\\rFAILED rc=" + String(mqttClient.returnCode()) + "\\r\\rRetry in 30 sec\"");
       uint32_t mqttReconnectTimer = millis(); // record current time for our timeout
       while ((millis() - mqttReconnectTimer) < 30000)
       { // Handle HTTP and OTA while we're waiting 30sec for MQTT to reconnect
@@ -346,10 +339,7 @@ void MQTTClass::callback(String &strTopic, String &strPayload)
     String mqqtvar1 = getSubtringField(strPayload, ',', 0);
     String mqqtvar2 = getSubtringField(strPayload, ',', 1);
     String mqqtvar3 = getSubtringField(strPayload, ',', 2);
-
-    beepOnTime = mqqtvar1.toInt();
-    beepOffTime = mqqtvar2.toInt();
-    beepCounter = mqqtvar3.toInt();
+    beep.playSound(mqqtvar1.toInt(), mqqtvar2.toInt(), mqqtvar3.toInt());
   }
   else if (strTopic.startsWith(_commandTopic) && (strPayload == ""))
   { // '[...]/device/command/p[1].b[4].txt' -m '' == nextion.getAttr("p[1].b[4].txt")

@@ -18,11 +18,17 @@
 #include "debug.h"
 extern debugClass debug; // our debug Object, USB Serial and/or Telnet
 
+#include "config_class.h"
+extern ConfigClass config; // our Configuration Container
+
 #include "mqtt_class.h"
 extern MQTTClass mqtt;   // our MQTT Object
 
 #include "web_class.h"
 extern WebClass web; // our HTTP Object
+
+#include "speaker_class.h"
+extern SpeakerClass beep; // our Speaker Object
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -33,13 +39,6 @@ extern bool updateCheck();
 extern void espReset();
 
 // TODO: Class These!
-extern bool     beepEnabled;                           // Keypress beep enabled
-extern uint32_t beepPrevMillis;                        // will store last time beep was updated
-extern uint32_t beepOnTime;                            // milliseconds of on-time for beep
-extern uint32_t beepOffTime;                           // milliseconds of off-time for beep
-extern bool     beepState;                             // beep currently engaged
-extern uint32_t beepCounter;                           // Count the number of beeps
-extern uint8_t  beepPin;                               // define beep pin output
 extern uint32_t tftFileSize;                           // Filesize for TFT firmware upload
 
 
@@ -296,12 +295,7 @@ void hmiNextionClass::processInput()
       debug.printLn(HMI, String(F("HMI IN: [Button ON] 'p[")) + page + "].b[" + buttonID + "]'");
 
       mqtt.publishButtonEvent(page, buttonID, "ON");
-      if (beepEnabled)
-      {
-        beepOnTime = 500;
-        beepOffTime = 100;
-        beepCounter = 1;
-      }
+      beep.playSound(500,100,1);
     }
     if (buttonAction == 0x00)
     {

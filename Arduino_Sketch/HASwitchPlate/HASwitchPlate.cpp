@@ -38,29 +38,26 @@
 #include <EEPROM.h>
 
 #include "debug.h"
+debugClass debug;         // our debug Object, USB Serial and/or Telnet
+
+#include "config_class.h"
+ConfigClass config; // our Configuration Container
+
 #include "hmi_nextion.h"
+hmiNextionClass nextion;  // our LCD Object
+
 #include "mqtt_class.h"
+MQTTClass mqtt;           // our MQTT Object
+
 #include "web_class.h"
+WebClass web; // our HTTP Server Object
+
+#include "speaker_class.h"
+SpeakerClass beep; // our Speaker Object
+
 
 // Settings (initial values) now live in a separate file
 // So we do not leave secrets here and upload to github accidentally
-
-char wifiSSID[32] = DEFAULT_WIFI_SSID; // Leave unset for wireless autoconfig. Note that these values will be lost
-char wifiPass[64] = DEFAULT_WIFI_PASS; // when updating, but that's probably OK because they will be saved in EEPROM.
-
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// These defaults may be overwritten with values saved by the web interface
-// Note that MQTT prefers dotted quad address, but MQTTS prefers fully qualified domain names (fqdn)
-// Note that MQTTS works best using NTP to obtain Time
-char mqttServer[64]     = DEFAULT_MQTT_SERVER;
-char mqttPort[6]        = DEFAULT_MQTT_PORT;
-char mqttUser[32]       = DEFAULT_MQTT_USER;
-char mqttPassword[32]   = DEFAULT_MQTT_PASS;
-char haspNode[16]       = DEFAULT_HASP_NODE;
-char groupName[16]      = DEFAULT_GROUP_NAME;
-char configUser[32]     = DEFAULT_CONFIG_USER;
-char configPassword[32] = DEFAULT_CONFIG_PASS;
-char motionPinConfig[3] = DEFAULT_MOTION_PIN;
 
 
 const float haspVersion = HASP_VERSION;              // Current HASP software release version
@@ -75,12 +72,6 @@ bool debugSerialD8Enabled = true;                   // Enable hardware serial de
 const uint32_t telnetInputMax = 128;                // Size of user input buffer for user telnet session
 bool motionEnabled = false;                         // Motion sensor is enabled
 bool mdnsEnabled = false;                           // mDNS enabled
-bool beepEnabled = false;                           // Keypress beep enabled
-uint32_t beepOnTime = BEEP_DEFAULT_TIME;            // milliseconds of on-time for beep
-uint32_t beepOffTime = BEEP_DEFAULT_TIME;           // milliseconds of off-time for beep
-bool beepState;                                     // beep currently engaged
-uint32_t beepCounter;                               // Count the number of beeps
-uint8_t beepPin;                                    // define beep pin output
 uint8_t motionPin = 0;                              // GPIO input pin for motion sensor if connected and enabled
 bool motionActive = false;                          // Motion is being detected
 const uint32_t motionLatchTimeout = MOTION_LATCH_TIMEOUT;          // Latch time for motion sensor
@@ -90,7 +81,6 @@ const uint32_t connectTimeout = CONNECTION_TIMEOUT;       // Timeout for WiFi an
 const uint32_t reConnectTimeout = RECONNECT_TIMEOUT;      // Timeout for WiFi reconnection attempts in seconds
 uint8_t espMac[6];                                        // Byte array to store our MAC address
 uint32_t updateCheckTimer = 0;                      // Timer for update check
-uint32_t beepTimer = 0;                             // will store last time beep was updated
 uint32_t tftFileSize = 0;                           // Filesize for TFT firmware upload
 
 WiFiClient wifiClient;                     // client for OTA?
@@ -98,10 +88,6 @@ WiFiServer telnetServer(23);               // Server listening for Telnet
 WiFiClient telnetClient;
 MDNSResponder::hMDNSService hMDNSService;  // Bonjour
 
-hmiNextionClass nextion;  // our LCD Object
-debugClass debug;         // our debug Object, USB Serial and/or Telnet
-MQTTClass mqtt;           // our MQTT Object
-WebClass web; // our HTTP Server Object
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -137,24 +123,24 @@ void setup()
   debug.begin();
   nextion.begin();
 
-  debug.printLn(String(F("SYSTEM: Starting HASwitchPlate v")) + String(haspVersion));
-  debug.printLn(String(F("SYSTEM: Last reset reason: ")) + String(ESP.getResetInfo()));
-  debug.printLn(String(F("SYSTEM: Heap Status: ")) + String(ESP.getFreeHeap()) + String(F(" ")) + String(ESP.getHeapFragmentation()) + String(F("%")) );
-  debug.printLn(String(F("SYSTEM: espCore: ")) + String(ESP.getCoreVersion()) );
+  debug.printLn(SYSTEM,String(F("SYSTEM: Starting HASwitchPlate v")) + String(haspVersion));
+  debug.printLn(SYSTEM,String(F("SYSTEM: Last reset reason: ")) + String(ESP.getResetInfo()));
+  debug.printLn(SYSTEM,String(F("SYSTEM: Heap Status: ")) + String(ESP.getFreeHeap()) + String(F(" ")) + String(ESP.getHeapFragmentation()) + String(F("%")) );
+  debug.printLn(SYSTEM,String(F("SYSTEM: espCore: ")) + String(ESP.getCoreVersion()) );
 
   //configRead(); // Check filesystem for a saved config.json
 
 
   espWifiSetup(); // Start up networking
 
-  debug.printLn(String(F("SYSTEM: Heap Status: ")) + String(ESP.getFreeHeap()) + String(F(" ")) + String(ESP.getHeapFragmentation()) + String(F("%")) );
+  debug.printLn(SYSTEM,String(F("SYSTEM: Heap Status: ")) + String(ESP.getFreeHeap()) + String(F(" ")) + String(ESP.getHeapFragmentation()) + String(F("%")) );
 
   if (mdnsEnabled)
   { // Setup mDNS service discovery if enabled
-    hMDNSService = MDNS.addService(haspNode, "http", "tcp", 80);
+    hMDNSService = MDNS.addService(config.getHaspNode(), "http", "tcp", 80);
     if (debug.getTelnetEnabled())
     {
-      MDNS.addService(haspNode, "telnet", "tcp", 23);
+      MDNS.addService(config.getHaspNode(), "telnet", "tcp", 23);
     }
     MDNS.addServiceTxt(hMDNSService, "app_name", "HASwitchPlate");
     MDNS.addServiceTxt(hMDNSService, "app_version", String(haspVersion).c_str());
@@ -169,11 +155,7 @@ void setup()
 
   motionSetup(); // Setup motion sensor if configured
 
-  if (beepEnabled)
-  { // Setup beep/tactile if configured
-    beepPin = 4;
-    pinMode(beepPin, OUTPUT);
-  }
+  beep.begin();
 
   if (debug.getTelnetEnabled())
   { // Setup telnet server for remote debug output
@@ -182,7 +164,7 @@ void setup()
     debug.printLn(String(F("TELNET: debug server enabled at telnet:")) + WiFi.localIP().toString());
   }
 
-  debug.printLn(F("SYSTEM: System init complete."));
+  debug.printLn(SYSTEM,F("SYSTEM: System init complete."));
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -228,25 +210,7 @@ void loop()
     handleTelnetClient(); // telnetClient loop
   }
 
-  if (beepEnabled)
-  { // Process Beeps
-    if ((beepState == true) && (millis() - beepTimer >= beepOnTime) && ((beepCounter > 0)))
-    {
-      beepState = false;         // Turn it off
-      beepTimer = millis(); // Remember the time
-      analogWrite(beepPin, 254); // start beep for beepOnTime
-      if (beepCounter > 0)
-      { // Update the beep counter.
-        beepCounter--;
-      }
-    }
-    else if ((beepState == false) && (millis() - beepTimer >= beepOffTime) && ((beepCounter >= 0)))
-    {
-      beepState = true;          // turn it on
-      beepTimer = millis(); // Remember the time
-      analogWrite(beepPin, 0);   // stop beep for beepOffTime
-    }
-  }
+  beep.loop();
 }
 
 
@@ -263,25 +227,25 @@ void espWifiSetup()
   nextion.setAttr("p[0].b[1].txt", "\"WiFi Connecting...\\r " + String(WiFi.SSID()) + "\"");
 
   WiFi.macAddress(espMac);            // Read our MAC address and save it to espMac
-  WiFi.hostname(haspNode);            // Assign our hostname before connecting to WiFi
+  WiFi.hostname(config.getHaspNode());            // Assign our hostname before connecting to WiFi
   WiFi.setAutoReconnect(true);        // Tell WiFi to autoreconnect if connection has dropped
   WiFi.setSleepMode(WIFI_NONE_SLEEP); // Disable WiFi sleep modes to prevent occasional disconnects
 
-  if (String(wifiSSID) == "")
+  if (String(config.getWIFISSID()) == "")
   { // If the sketch has not defined a static wifiSSID use WiFiManager to collect required information from the user.
 
     // id/name, placeholder/prompt, default value, length, extra tags
     WiFiManagerParameter custom_haspNodeHeader("<br/><br/><b>HASP Node Name</b>");
-    WiFiManagerParameter custom_haspNode("haspNode", "HASP Node (required. lowercase letters, numbers, and _ only)", haspNode, 15, " maxlength=15 required pattern='[a-z0-9_]*'");
-    WiFiManagerParameter custom_groupName("groupName", "Group Name (required)", groupName, 15, " maxlength=15 required");
+    WiFiManagerParameter custom_haspNode("haspNode", "HASP Node (required. lowercase letters, numbers, and _ only)", config.getHaspNode(), 15, " maxlength=15 required pattern='[a-z0-9_]*'");
+    WiFiManagerParameter custom_groupName("groupName", "Group Name (required)", config.getGroupName(), 15, " maxlength=15 required");
     WiFiManagerParameter custom_mqttHeader("<br/><br/><b>MQTT Broker</b>");
-    WiFiManagerParameter custom_mqttServer("mqttServer", "MQTT Server", mqttServer, 63, " maxlength=39");
-    WiFiManagerParameter custom_mqttPort("mqttPort", "MQTT Port", mqttPort, 5, " maxlength=5 type='number'");
-    WiFiManagerParameter custom_mqttUser("mqttUser", "MQTT User", mqttUser, 31, " maxlength=31");
-    WiFiManagerParameter custom_mqttPassword("mqttPassword", "MQTT Password", mqttPassword, 31, " maxlength=31 type='password'");
+    WiFiManagerParameter custom_mqttServer("mqttServer", "MQTT Server", config.getMQTTServer(), 63, " maxlength=39");
+    WiFiManagerParameter custom_mqttPort("mqttPort", "MQTT Port", config.getMQTTPort(), 5, " maxlength=5 type='number'");
+    WiFiManagerParameter custom_mqttUser("mqttUser", "MQTT User", config.getMQTTUser(), 31, " maxlength=31");
+    WiFiManagerParameter custom_mqttPassword("mqttPassword", "MQTT Password", config.getMQTTPassword(), 31, " maxlength=31 type='password'");
     WiFiManagerParameter custom_configHeader("<br/><br/><b>Admin access</b>");
-    WiFiManagerParameter custom_configUser("configUser", "Config User", configUser, 15, " maxlength=31'");
-    WiFiManagerParameter custom_configPassword("configPassword", "Config Password", configPassword, 31, " maxlength=31 type='password'");
+    WiFiManagerParameter custom_configUser("configUser", "Config User", config.getConfigUser(), 15, " maxlength=31'");
+    WiFiManagerParameter custom_configPassword("configPassword", "Config Password", config.getConfigPassword(), 31, " maxlength=31 type='password'");
 
     WiFiManager wifiManager;
     wifiManager.setSaveConfigCallback(configSaveCallback); // set config save notify callback
@@ -308,19 +272,19 @@ void espWifiSetup()
     // and goes into a blocking loop awaiting configuration.
     if (!wifiManager.autoConnect(wifiConfigAP, wifiConfigPass))
     { // Reset and try again
-      debug.printLn(F("WIFI: Failed to connect and hit timeout"));
+      debug.printLn(WIFI,F("WIFI: Failed to connect and hit timeout"));
       espReset();
     }
 
     // Read updated parameters
-    strcpy(mqttServer, custom_mqttServer.getValue());
-    strcpy(mqttPort, custom_mqttPort.getValue());
-    strcpy(mqttUser, custom_mqttUser.getValue());
-    strcpy(mqttPassword, custom_mqttPassword.getValue());
-    strcpy(haspNode, custom_haspNode.getValue());
-    strcpy(groupName, custom_groupName.getValue());
-    strcpy(configUser, custom_configUser.getValue());
-    strcpy(configPassword, custom_configPassword.getValue());
+    config.setMQTTServer(custom_mqttServer.getValue());
+    config.setMQTTPort(custom_mqttPort.getValue());
+    config.setMQTTUser(custom_mqttUser.getValue());
+    config.setMQTTPassword(custom_mqttPassword.getValue());
+    config.setHaspNode(custom_haspNode.getValue());
+    config.setGroupName(custom_groupName.getValue());
+    config.setConfigUser(custom_configUser.getValue());
+    config.setConfigPassword(custom_configPassword.getValue());
 
     if (shouldSaveConfig)
     { // Save the custom parameters to FS
@@ -329,9 +293,9 @@ void espWifiSetup()
   }
   else
   { // wifiSSID has been defined, so attempt to connect to it forever
-    debug.printLn(String(F("Connecting to WiFi network: ")) + String(wifiSSID));
+    debug.printLn(WIFI,String(F("Connecting to WiFi network: ")) + String(config.getWIFISSID()));
     WiFi.mode(WIFI_STA);
-    WiFi.begin(wifiSSID, wifiPass);
+    WiFi.begin(config.getWIFISSID(), config.getWIFIPass());
 
     uint32_t wifiReconnectTimer = millis();
     while (WiFi.status() != WL_CONNECTED)
@@ -339,7 +303,7 @@ void espWifiSetup()
       delay(500);
       if (millis() >= (wifiReconnectTimer + (connectTimeout * ASECOND)))
       { // If we've been trying to reconnect for connectTimeout seconds, reboot and try again
-        debug.printLn(F("WIFI: Failed to connect and hit timeout"));
+        debug.printLn(WIFI,F("WIFI: Failed to connect and hit timeout"));
         espReset();
       }
     }
@@ -347,7 +311,7 @@ void espWifiSetup()
   // If you get here you have connected to WiFi
   nextion.setAttr("p[0].b[1].font", "6");
   nextion.setAttr("p[0].b[1].txt", "\"WiFi Connected!\\r " + String(WiFi.SSID()) + "\\rIP: " + WiFi.localIP().toString() + "\"");
-  debug.printLn(String(F("WIFI: Connected successfully and assigned IP: ")) + WiFi.localIP().toString());
+  debug.printLn(WIFI,String(F("WIFI: Connected successfully and assigned IP: ")) + WiFi.localIP().toString());
   if (nextion.getActivePage())
   {
     nextion.sendCmd("page " + String(nextion.getActivePage()));
@@ -357,9 +321,9 @@ void espWifiSetup()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void espWifiReconnect()
 { // Existing WiFi connection dropped, try to reconnect
-  debug.printLn(F("Reconnecting to WiFi network..."));
+  debug.printLn(WIFI,F("Reconnecting to WiFi network..."));
   WiFi.mode(WIFI_STA);
-  WiFi.begin(wifiSSID, wifiPass);
+  WiFi.begin(config.getWIFISSID(), config.getWIFIPass());
 
   uint32_t wifiReconnectTimer = millis();
   while (WiFi.status() != WL_CONNECTED)
@@ -367,7 +331,7 @@ void espWifiReconnect()
     delay(500);
     if (millis() >= (wifiReconnectTimer + (reConnectTimeout * ASECOND)))
     { // If we've been trying to reconnect for reConnectTimeout seconds, reboot and try again
-      debug.printLn(F("WIFI: Failed to reconnect and hit timeout"));
+      debug.printLn(WIFI,F("WIFI: Failed to reconnect and hit timeout"));
       espReset();
     }
   }
@@ -376,7 +340,7 @@ void espWifiReconnect()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void espWifiConfigCallback(WiFiManager *myWiFiManager)
 { // Notify the user that we're entering config mode
-  debug.printLn(F("WIFI: Failed to connect to assigned AP, entering config mode"));
+  debug.printLn(WIFI,F("WIFI: Failed to connect to assigned AP, entering config mode"));
   while (millis() < 800)
   { // for factory-reset system this will be called before display is responsive. give it a second.
     delay(10);
@@ -391,8 +355,8 @@ void espWifiConfigCallback(WiFiManager *myWiFiManager)
 void espSetupOta()
 { // (mostly) boilerplate OTA setup from library examples
 
-  ArduinoOTA.setHostname(haspNode);
-  ArduinoOTA.setPassword(configPassword);
+  ArduinoOTA.setHostname(config.getHaspNode());
+  ArduinoOTA.setPassword(config.getConfigPassword());
 
   ArduinoOTA.onStart([]() {
       debug.printLn(F("ESP OTA: update start"));
@@ -493,65 +457,51 @@ void configRead()
         {
           if (!configJson["mqttServer"].isNull())
           {
-            strcpy(mqttServer, configJson["mqttServer"]);
+            config.setMQTTServer(configJson["mqttServer"]);
           }
           if (!configJson["mqttPort"].isNull())
           {
-            strcpy(mqttPort, configJson["mqttPort"]);
+            config.setMQTTPort(configJson["mqttPort"]);
           }
           if (!configJson["mqttUser"].isNull())
           {
-            strcpy(mqttUser, configJson["mqttUser"]);
+            config.setMQTTUser(configJson["mqttUser"]);
           }
           if (!configJson["mqttPassword"].isNull())
           {
-            strcpy(mqttPassword, configJson["mqttPassword"]);
+            config.setMQTTPassword(configJson["mqttPassword"]);
           }
           if (!configJson["haspNode"].isNull())
           {
-            strcpy(haspNode, configJson["haspNode"]);
+            config.setHaspNode(configJson["haspNode"]);
           }
           if (!configJson["groupName"].isNull())
           {
-            strcpy(groupName, configJson["groupName"]);
+            config.setGroupName(configJson["groupName"]);
           }
           if (!configJson["configUser"].isNull())
           {
-            strcpy(configUser, configJson["configUser"]);
+            config.setConfigUser(configJson["configUser"]);
           }
           if (!configJson["configPassword"].isNull())
           {
-            strcpy(configPassword, configJson["configPassword"]);
+            config.setConfigPassword(configJson["configPassword"]);
           }
           if (!configJson["motionPinConfig"].isNull())
           {
-            strcpy(motionPinConfig, configJson["motionPinConfig"]);
+            config.setMotionPin(configJson["motionPinConfig"]);
           }
           if (!configJson["debugSerialEnabled"].isNull())
           {
-            if (configJson["debugSerialEnabled"])
-            {
-              debug.enableSerial(true);
-            }
-            else
-            {
-              debug.enableSerial(false);
-            }
+            debug.enableSerial(configJson["debugSerialEnabled"]); // debug, config, or both?
           }
           if (!configJson["debugTelnetEnabled"].isNull())
           {
-            if (configJson["debugTelnetEnabled"])
-            {
-              debug.enableTelnet(true);
-            }
-            else
-            {
-              debug.enableTelnet(false);
-            }
+            debug.enableTelnet(configJson["debugTelnetEnabled"]); // debug, config, or both?
           }
           if (!configJson["mdnsEnabled"].isNull())
           {
-            if (configJson["mdnsEnabled"])
+            if (configJson["mdnsEnabled"]) // local or config?
             {
               mdnsEnabled = true;
             }
@@ -562,14 +512,7 @@ void configRead()
           }
           if (!configJson["beepEnabled"].isNull())
           {
-            if (configJson["beepEnabled"])
-            {
-              beepEnabled = true;
-            }
-            else
-            {
-              beepEnabled = false;
-            }
+            beep.enable(configJson["beepEnabled"]);
           }
           String configJsonStr;
           serializeJson(configJson, configJsonStr);
@@ -605,33 +548,33 @@ void configSave()
   nextion.setAttr("p[0].b[1].txt", "\"Saving\\rconfig\"");
   debug.printLn(F("SPIFFS: Saving config"));
   DynamicJsonDocument jsonConfigValues(1024);
-  jsonConfigValues["mqttServer"] = mqttServer;
-  jsonConfigValues["mqttPort"] = mqttPort;
-  jsonConfigValues["mqttUser"] = mqttUser;
-  jsonConfigValues["mqttPassword"] = mqttPassword;
-  jsonConfigValues["haspNode"] = haspNode;
-  jsonConfigValues["groupName"] = groupName;
-  jsonConfigValues["configUser"] = configUser;
-  jsonConfigValues["configPassword"] = configPassword;
-  jsonConfigValues["motionPinConfig"] = motionPinConfig;
+  jsonConfigValues["mqttServer"] = config.getMQTTServer();
+  jsonConfigValues["mqttPort"] = config.getMQTTPort();
+  jsonConfigValues["mqttUser"] = config.getMQTTUser();
+  jsonConfigValues["mqttPassword"] = config.getMQTTPassword();
+  jsonConfigValues["haspNode"] = config.getHaspNode();
+  jsonConfigValues["groupName"] = config.getGroupName();
+  jsonConfigValues["configUser"] = config.getConfigUser();
+  jsonConfigValues["configPassword"] = config.getConfigPassword();
+  jsonConfigValues["motionPinConfig"] = config.getMotionPin();
   jsonConfigValues["debugSerialEnabled"] = debug.getSerialEnabled();
   jsonConfigValues["debugTelnetEnabled"] = debug.getTelnetEnabled();
   jsonConfigValues["mdnsEnabled"] = mdnsEnabled;
-  jsonConfigValues["beepEnabled"] = beepEnabled;
+  jsonConfigValues["beepEnabled"] = beep.getEnable();
 
-  debug.printLn(String(F("SPIFFS: mqttServer = ")) + String(mqttServer));
-  debug.printLn(String(F("SPIFFS: mqttPort = ")) + String(mqttPort));
-  debug.printLn(String(F("SPIFFS: mqttUser = ")) + String(mqttUser));
-  debug.printLn(String(F("SPIFFS: mqttPassword = ")) + String(mqttPassword));
-  debug.printLn(String(F("SPIFFS: haspNode = ")) + String(haspNode));
-  debug.printLn(String(F("SPIFFS: groupName = ")) + String(groupName));
-  debug.printLn(String(F("SPIFFS: configUser = ")) + String(configUser));
-  debug.printLn(String(F("SPIFFS: configPassword = ")) + String(configPassword));
-  debug.printLn(String(F("SPIFFS: motionPinConfig = ")) + String(motionPinConfig));
+  debug.printLn(String(F("SPIFFS: mqttServer = ")) + String(config.getMQTTServer()));
+  debug.printLn(String(F("SPIFFS: mqttPort = ")) + String(config.getMQTTPort()));
+  debug.printLn(String(F("SPIFFS: mqttUser = ")) + String(config.getMQTTUser()));
+  debug.printLn(String(F("SPIFFS: mqttPassword = ")) + String(config.getMQTTPassword()));
+  debug.printLn(String(F("SPIFFS: haspNode = ")) + String(config.getHaspNode()));
+  debug.printLn(String(F("SPIFFS: groupName = ")) + String(config.getGroupName()));
+  debug.printLn(String(F("SPIFFS: configUser = ")) + String(config.getConfigUser()));
+  debug.printLn(String(F("SPIFFS: configPassword = ")) + String(config.getConfigPassword()));
+  debug.printLn(String(F("SPIFFS: motionPinConfig = ")) + String(config.getMotionPin()));
   debug.printLn(String(F("SPIFFS: debugSerialEnabled = ")) + String(debug.getSerialEnabled()));
   debug.printLn(String(F("SPIFFS: debugTelnetEnabled = ")) + String(debug.getTelnetEnabled()));
   debug.printLn(String(F("SPIFFS: mdnsEnabled = ")) + String(mdnsEnabled));
-  debug.printLn(String(F("SPIFFS: beepEnabled = ")) + String(beepEnabled));
+  debug.printLn(String(F("SPIFFS: beepEnabled = ")) + String(beep.getEnable()));
 
   File configFile = SPIFFS.open("/config.json", "w");
   if (!configFile)
@@ -739,19 +682,19 @@ bool updateCheck()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void motionSetup()
 {
-  if (strcmp(motionPinConfig, "D0") == 0)
+  if (strcmp(config.getMotionPin(), "D0") == 0)
   {
     motionEnabled = true;
     motionPin = D0;
     pinMode(motionPin, INPUT);
   }
-  else if (strcmp(motionPinConfig, "D1") == 0)
+  else if (strcmp(config.getMotionPin(), "D1") == 0)
   {
     motionEnabled = true;
     motionPin = D1;
     pinMode(motionPin, INPUT);
   }
-  else if (strcmp(motionPinConfig, "D2") == 0)
+  else if (strcmp(config.getMotionPin(), "D2") == 0)
   {
     motionEnabled = true;
     motionPin = D2;
