@@ -34,7 +34,6 @@ extern MQTTClass mqtt; // our MQTT Object
 extern SpeakerClass beep; // our Speaker Object
 
 
-const float haspVersion = HASP_VERSION;            // Current HASP software release version
 extern uint8_t espMac[6];                          // Byte array to store our MAC address
 extern String lcdFirmwareUrl;                      // Default link to compiled Nextion firmware images
 extern String espFirmwareUrl;                      // Default link to compiled Arduino firmware image
@@ -59,12 +58,8 @@ extern void espWifiSetup();
 ESP8266WebServer webServer(80);            // Server listening for HTTP
 ESP8266HTTPUpdateServer httpOTAUpdate;
 
-// URL for auto-update "version.json"
-const char UPDATE_URL[] = "http://haswitchplate.com/update/version.json";
-// Default link to compiled Arduino firmware image
-String espFirmwareUrl = "http://haswitchplate.com/update/HASwitchPlate.ino.d1_mini.bin";
-// Default link to compiled Nextion firmware images
-String lcdFirmwareUrl = "http://haswitchplate.com/update/HASwitchPlate.tft";
+extern String espFirmwareUrl;
+extern String lcdFirmwareUrl;
 
 
 // a reference to our global copy of self, so we can make working callbacks
@@ -124,19 +119,23 @@ void callback_HandleTftFileSize()
 {
   web._handleTftFileSize();
 }
-void callback_HandleReboot() 
+void callback_HandleReboot()
 {
     web._handleReboot();
 }
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void WebClass::begin() 
+void WebClass::begin()
 { // called in the main code setup, handles our initialisation
   _alive=true;
-  if ((config.getConfigPassword()[0] != '\0') && (config.getConfigUser()[0] != '\0'))
+
+  setUser(DEFAULT_CONFIG_USER);
+  setPassword(DEFAULT_CONFIG_PASS);
+
+  if ((_configPassword[0] != '\0') && (_configUser[0] != '\0'))
   { // Start the webserver with our assigned password if it's been configured...
-    httpOTAUpdate.setup(&webServer, "/update", config.getConfigUser(), config.getConfigPassword());
+    httpOTAUpdate.setup(&webServer, "/update", _configUser, _configPassword);
   }
   else
   { // or without a password if not
@@ -161,17 +160,21 @@ void WebClass::begin()
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void WebClass::loop() 
+void WebClass::loop()
 { // called in the main code loop, handles our periodic code
+  if( !_alive )
+  {
+    begin();
+  }
   webServer.handleClient(); // webServer loop
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool WebClass::_authenticated(void)
 { // common code to verify our authentication on most handle callbacks
-  if (config.getConfigPassword()[0] != '\0')
+  if (_configPassword[0] != '\0')
   { //Request HTTP auth if configPassword is set
-    if (!webServer.authenticate(config.getConfigUser(), config.getConfigPassword()))
+    if (!webServer.authenticate(_configUser, _configPassword))
     {
       webServer.requestAuthentication();
       return false;
@@ -229,9 +232,9 @@ void WebClass::_handleRoot()
   {
     httpMessage += String("********");
   }
-  httpMessage += String(F("'><br/><br/><b>HASP Admin Username</b> <i><small>(optional)</small></i><input id='configUser' name='configUser' maxlength=31 placeholder='Admin User' value='")) + String(config.getConfigUser()) + "'>";
+  httpMessage += String(F("'><br/><br/><b>HASP Admin Username</b> <i><small>(optional)</small></i><input id='configUser' name='configUser' maxlength=31 placeholder='Admin User' value='")) + String(_configUser) + "'>";
   httpMessage += String(F("<br/><b>HASP Admin Password</b> <i><small>(optional)</small></i><input id='configPassword' name='configPassword' type='password' maxlength=31 placeholder='Admin User Password' value='"));
-  if (strlen(config.getConfigPassword()) != 0)
+  if (strlen(_configPassword) != 0)
   {
     httpMessage += String("********");
   }
@@ -307,7 +310,7 @@ void WebClass::_handleRoot()
     httpMessage += String(F("<font color='red'><b>Disconnected</b></font>, return code: ")) + mqtt.clientReturnCode();
   }
   httpMessage += String(F("<br/><b>MQTT ClientID: </b>")) + mqtt.getClientID();
-  httpMessage += String(F("<br/><b>HASP Version: </b>")) + String(haspVersion);
+  httpMessage += String(F("<br/><b>HASP Version: </b>")) + String(config.getHaspVersion());
   httpMessage += String(F("<br/><b>LCD Model: </b>")) + String(nextion.getModel());
   httpMessage += String(F("<br/><b>LCD Version: </b>")) + String(nextion.getLCDVersion());
   httpMessage += String(F("<br/><b>LCD Active Page: </b>")) + String(nextion.getActivePage());
@@ -383,15 +386,15 @@ void WebClass::_handleSaveConfig()
     shouldSaveConfig = true;
     webServer.arg("mqttPassword").toCharArray(config.getMQTTPassword(), 32);
   }
-  if (webServer.arg("configUser") != String(config.getConfigUser()))
+  if (webServer.arg("configUser") != String(_configUser))
   { // Handle configUser
     shouldSaveConfig = true;
-    webServer.arg("configUser").toCharArray(config.getConfigUser(), 32);
+    webServer.arg("configUser").toCharArray(_configUser, 32);
   }
   if (webServer.arg("configPassword") != String("********"))
   { // Handle configPassword
     shouldSaveConfig = true;
-    webServer.arg("configPassword").toCharArray(config.getConfigPassword(), 32);
+    webServer.arg("configPassword").toCharArray(_configPassword, 32);
   }
   if (webServer.arg("motionPinConfig") != String(config.getMotionPin()))
   { // Handle motionPinConfig

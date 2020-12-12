@@ -93,5 +93,5 @@ protected:
   String _lightBrightStateTopic;                   // MQTT topic for outgoing panel backlight dimmer state
   String _motionStateTopic;                        // MQTT topic for outgoing motion sensor state
   uint32_t _statusUpdateTimer;                     // Timer for update check
-    
+
 };

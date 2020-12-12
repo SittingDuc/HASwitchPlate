@@ -43,6 +43,10 @@ void SpeakerClass::begin()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void SpeakerClass::loop()
 { // called in the main code loop, handles our periodic code
+  if (!_alive )
+  {
+    begin();
+  }
   if ( _beepEnabled )
   { // Process Beeps
     if ((_beepState == true) && (millis() - _beepTimer >= _beepOnTime) && ((_beepCounter > 0)))

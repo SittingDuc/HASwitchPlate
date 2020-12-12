@@ -1,10 +1,10 @@
 // -*- C++ -*-
 // HASwitchPlate Forked
-// 
+//
 // Inherits MIT license from HASwitchPlate.ino
 // most Copyright (c) 2019 Allen Derusha allen@derusha.org
 // little changes Copyright (C) 2020 Gerard Sharp (find me on GitHub)
-// 
+//
 //
 // debug.h : A class and support works to print debug messages to the serial console
 //

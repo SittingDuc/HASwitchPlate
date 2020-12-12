@@ -25,8 +25,8 @@ private:
 public:
   ////////////////////////////////////////////////////////////////////////////////////////////////////
   // constructor
-  ConfigClass(void) 
-  { 
+  ConfigClass(void)
+  {
     _alive = false;
     setWIFISSID(DEFAULT_WIFI_SSID);
     setWIFIPass(DEFAULT_WIFI_PASS);
@@ -41,8 +41,6 @@ public:
     setMQTTPassword(DEFAULT_MQTT_PASS);
     setHaspNode(DEFAULT_HASP_NODE);
     setGroupName(DEFAULT_GROUP_NAME);
-    setConfigUser(DEFAULT_CONFIG_USER);
-    setConfigPassword(DEFAULT_CONFIG_PASS);
     setMotionPin(DEFAULT_MOTION_PIN);
   }
 
@@ -77,42 +75,38 @@ public:
 
   char *getMQTTPassword(void) { return _mqttPassword; }
   void setMQTTPassword(const char *value) { strncpy(_mqttPassword, value, 32); _mqttPassword[31]='\0'; }
-  
+
   char *getHaspNode(void) { return _haspNode; }
   void setHaspNode(const char *value) { strncpy(_haspNode, value, 16); _haspNode[15]='\0'; }
 
   char *getGroupName(void) { return _groupName; }
   void setGroupName(const char *value) { strncpy(_groupName, value, 16); _groupName[15]='\0'; }
 
-  char *getConfigUser(void) { return _configUser; }
-  void setConfigUser(const char *value) { strncpy(_configUser, value, 32); _configUser[31]='\0'; }
-
-  char *getConfigPassword(void) { return _configPassword; }
-  void setConfigPassword(const char *value) { strncpy(_configPassword, value, 32); _configPassword[31]='\0'; }
-
   char *getMotionPin(void) { return _motionPin; }
   void setMotionPin(const char *value) { strncpy(_motionPin, value, 3); _motionPin[2]='\0'; }
+
+  float getHaspVersion(void) { return _haspVersion; }
 
 protected:
   bool     _alive;
 
 // initial values would be useful?
-    // "in class initialisation is only legal since C++11"
-    char _wifiSSID[32]; // Leave unset for wireless autoconfig. Note that these values will be lost
-    char _wifiPass[64]; // when updating, but that's probably OK because they will be saved in EEPROM.
+  // "in class initialisation is only legal since C++11"
+  char _wifiSSID[32]; // Leave unset for wireless autoconfig. Note that these values will be lost
+  char _wifiPass[64]; // when updating, but that's probably OK because they will be saved in EEPROM.
 
-    ////////////////////////////////////////////////////////////////////////////////////////////////////
-    // These defaults may be overwritten with values saved by the web interface
-    // Note that MQTT prefers dotted quad address, but MQTTS prefers fully qualified domain names (fqdn)
-    // Note that MQTTS works best using NTP to obtain Time
-    char _mqttServer[64];
-    char _mqttPort[6];
-    char _mqttUser[32];
-    char _mqttPassword[32];
-    char _haspNode[16];
-    char _groupName[16];
-    char _configUser[32]; // these two might belong in WebClass
-    char _configPassword[32]; // these two might belong in WebClass
-    char _motionPin[3];
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+  // These defaults may be overwritten with values saved by the web interface
+  // Note that MQTT prefers dotted quad address, but MQTTS prefers fully qualified domain names (fqdn)
+  // Note that MQTTS works best using NTP to obtain Time
+  char _mqttServer[64];
+  char _mqttPort[6];
+  char _mqttUser[32];
+  char _mqttPassword[32];
+  char _haspNode[16];
+  char _groupName[16];
+  char _motionPin[3];
+
+  const float _haspVersion = HASP_VERSION; // Current HASP software release version
 
 };

@@ -60,7 +60,6 @@ SpeakerClass beep; // our Speaker Object
 // So we do not leave secrets here and upload to github accidentally
 
 
-const float haspVersion = HASP_VERSION;              // Current HASP software release version
 const char wifiConfigPass[9] = WIFI_CONFIG_PASSWORD; // First-time config WPA2 password
 const char wifiConfigAP[14] = WIFI_CONFIG_AP;        // First-time config SSID
 bool shouldSaveConfig = false;                       // Flag to save json config to SPIFFS
@@ -81,12 +80,18 @@ const uint32_t connectTimeout = CONNECTION_TIMEOUT;       // Timeout for WiFi an
 const uint32_t reConnectTimeout = RECONNECT_TIMEOUT;      // Timeout for WiFi reconnection attempts in seconds
 uint8_t espMac[6];                                        // Byte array to store our MAC address
 uint32_t updateCheckTimer = 0;                      // Timer for update check
-uint32_t tftFileSize = 0;                           // Filesize for TFT firmware upload
 
 WiFiClient wifiClient;                     // client for OTA?
 WiFiServer telnetServer(23);               // Server listening for Telnet
 WiFiClient telnetClient;
 MDNSResponder::hMDNSService hMDNSService;  // Bonjour
+
+// URL for auto-update "version.json"
+const char UPDATE_URL[] = DEFAULT_URL_UPDATE;
+// Default link to compiled Arduino firmware image
+String espFirmwareUrl = DEFAULT_URL_ARDUINO_FW;
+// Default link to compiled Nextion firmware images
+String lcdFirmwareUrl = DEFAULT_URL_LCD_FW;
 
 
 
@@ -123,7 +128,7 @@ void setup()
   debug.begin();
   nextion.begin();
 
-  debug.printLn(SYSTEM,String(F("SYSTEM: Starting HASwitchPlate v")) + String(haspVersion));
+  debug.printLn(SYSTEM,String(F("SYSTEM: Starting HASwitchPlate v")) + String(config.getHaspVersion()));
   debug.printLn(SYSTEM,String(F("SYSTEM: Last reset reason: ")) + String(ESP.getResetInfo()));
   debug.printLn(SYSTEM,String(F("SYSTEM: Heap Status: ")) + String(ESP.getFreeHeap()) + String(F(" ")) + String(ESP.getHeapFragmentation()) + String(F("%")) );
   debug.printLn(SYSTEM,String(F("SYSTEM: espCore: ")) + String(ESP.getCoreVersion()) );
@@ -143,7 +148,7 @@ void setup()
       MDNS.addService(config.getHaspNode(), "telnet", "tcp", 23);
     }
     MDNS.addServiceTxt(hMDNSService, "app_name", "HASwitchPlate");
-    MDNS.addServiceTxt(hMDNSService, "app_version", String(haspVersion).c_str());
+    MDNS.addServiceTxt(hMDNSService, "app_version", String(config.getHaspVersion()).c_str());
     MDNS.update();
   }
 
@@ -244,8 +249,8 @@ void espWifiSetup()
     WiFiManagerParameter custom_mqttUser("mqttUser", "MQTT User", config.getMQTTUser(), 31, " maxlength=31");
     WiFiManagerParameter custom_mqttPassword("mqttPassword", "MQTT Password", config.getMQTTPassword(), 31, " maxlength=31 type='password'");
     WiFiManagerParameter custom_configHeader("<br/><br/><b>Admin access</b>");
-    WiFiManagerParameter custom_configUser("configUser", "Config User", config.getConfigUser(), 15, " maxlength=31'");
-    WiFiManagerParameter custom_configPassword("configPassword", "Config Password", config.getConfigPassword(), 31, " maxlength=31 type='password'");
+    WiFiManagerParameter custom_configUser("configUser", "Config User", web.getUser(), 15, " maxlength=31'");
+    WiFiManagerParameter custom_configPassword("configPassword", "Config Password", web.getPassword(), 31, " maxlength=31 type='password'");
 
     WiFiManager wifiManager;
     wifiManager.setSaveConfigCallback(configSaveCallback); // set config save notify callback
@@ -283,8 +288,8 @@ void espWifiSetup()
     config.setMQTTPassword(custom_mqttPassword.getValue());
     config.setHaspNode(custom_haspNode.getValue());
     config.setGroupName(custom_groupName.getValue());
-    config.setConfigUser(custom_configUser.getValue());
-    config.setConfigPassword(custom_configPassword.getValue());
+    web.setUser(custom_configUser.getValue());
+    web.setPassword(custom_configPassword.getValue());
 
     if (shouldSaveConfig)
     { // Save the custom parameters to FS
@@ -356,7 +361,7 @@ void espSetupOta()
 { // (mostly) boilerplate OTA setup from library examples
 
   ArduinoOTA.setHostname(config.getHaspNode());
-  ArduinoOTA.setPassword(config.getConfigPassword());
+  ArduinoOTA.setPassword(web.getPassword());
 
   ArduinoOTA.onStart([]() {
       debug.printLn(F("ESP OTA: update start"));
@@ -481,11 +486,11 @@ void configRead()
           }
           if (!configJson["configUser"].isNull())
           {
-            config.setConfigUser(configJson["configUser"]);
+            web.setUser(configJson["configUser"]);
           }
           if (!configJson["configPassword"].isNull())
           {
-            config.setConfigPassword(configJson["configPassword"]);
+            web.setPassword(configJson["configPassword"]);
           }
           if (!configJson["motionPinConfig"].isNull())
           {
@@ -554,8 +559,8 @@ void configSave()
   jsonConfigValues["mqttPassword"] = config.getMQTTPassword();
   jsonConfigValues["haspNode"] = config.getHaspNode();
   jsonConfigValues["groupName"] = config.getGroupName();
-  jsonConfigValues["configUser"] = config.getConfigUser();
-  jsonConfigValues["configPassword"] = config.getConfigPassword();
+  jsonConfigValues["configUser"] = web.getUser();
+  jsonConfigValues["configPassword"] = web.getPassword();
   jsonConfigValues["motionPinConfig"] = config.getMotionPin();
   jsonConfigValues["debugSerialEnabled"] = debug.getSerialEnabled();
   jsonConfigValues["debugTelnetEnabled"] = debug.getTelnetEnabled();
@@ -568,8 +573,8 @@ void configSave()
   debug.printLn(String(F("SPIFFS: mqttPassword = ")) + String(config.getMQTTPassword()));
   debug.printLn(String(F("SPIFFS: haspNode = ")) + String(config.getHaspNode()));
   debug.printLn(String(F("SPIFFS: groupName = ")) + String(config.getGroupName()));
-  debug.printLn(String(F("SPIFFS: configUser = ")) + String(config.getConfigUser()));
-  debug.printLn(String(F("SPIFFS: configPassword = ")) + String(config.getConfigPassword()));
+  debug.printLn(String(F("SPIFFS: configUser = ")) + String(web.getUser()));
+  debug.printLn(String(F("SPIFFS: configPassword = ")) + String(web.getPassword()));
   debug.printLn(String(F("SPIFFS: motionPinConfig = ")) + String(config.getMotionPin()));
   debug.printLn(String(F("SPIFFS: debugSerialEnabled = ")) + String(debug.getSerialEnabled()));
   debug.printLn(String(F("SPIFFS: debugTelnetEnabled = ")) + String(debug.getTelnetEnabled()));
@@ -617,10 +622,10 @@ void configClearSaved()
 bool updateCheck()
 { // firmware update check
   // Gerard has placed nodes on an isolated network. Connecting to the live internet is verboten and unpossible. So skip the pointless check
+#ifdef DISABLE_UPDATE_CHECK
   updateEspAvailable = false;
   updateLcdAvailable = false;
-  return true;
-/*
+#else
   HTTPClient updateClient;
   debug.printLn(String(F("UPDATE: Checking update URL: ")) + String(UPDATE_URL));
   String updatePayload;
@@ -656,7 +661,7 @@ bool updateCheck()
   updateEspAvailableVersion = updateJson["d1_mini"]["version"].as<float>();
   debug.printLn(String(F("UPDATE: updateEspAvailableVersion: ")) + String(updateEspAvailableVersion));
   espFirmwareUrl = updateJson["d1_mini"]["firmware"].as<String>();
-  if (updateEspAvailableVersion > haspVersion)
+  if (updateEspAvailableVersion > config.getHaspVersion())
   {
   updateEspAvailable = true;
   debug.printLn(String(F("UPDATE: New ESP version available: ")) + String(updateEspAvailableVersion));
@@ -675,7 +680,7 @@ bool updateCheck()
   }
   debug.printLn(F("UPDATE: Update check completed"));
   }
-*/
+#endif
   return true;
 }
 
@@ -728,7 +733,7 @@ void motionUpdate()
     {
       motionLatchTimer = millis();
       mqtt.publishMotionTopic(String(F("OFF")));
-      
+
       motionActive = motionActiveBuffer;
       debug.printLn("MOTION: Inactive");
     }

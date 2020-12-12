@@ -35,13 +35,11 @@ extern SpeakerClass beep; // our Speaker Object
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // TODO: Class These!
-const float haspVersion = HASP_VERSION;              // Current HASP software release version
 extern uint8_t espMac[6];                          // Byte array to store our MAC address
 extern String lcdFirmwareUrl;                      // Default link to compiled Nextion firmware images
 extern String espFirmwareUrl;                      // Default link to compiled Arduino firmware image
 extern bool updateEspAvailable;                    // Flag for update check to report new ESP FW version
 extern bool updateLcdAvailable;                    // Flag for update check to report new LCD FW version
-extern uint32_t tftFileSize;                           // Filesize for TFT firmware upload
 
 // TODO: Class These!
 extern String getSubtringField(String data, char separator, int index); // TODO: class me
@@ -84,6 +82,10 @@ void MQTTClass::begin()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void MQTTClass::loop()
 { // called in the main code loop, handles our periodic code
+  if( !_alive )
+  {
+    begin();
+  }
   if (!mqttClient.connected())
   { // Check MQTT connection
     debug.printLn("MQTT: not connected, connecting.");
@@ -393,7 +395,7 @@ void MQTTClass::statusUpdate()
   _statusUpdateTimer = millis();
   String statusPayload = "{";
   statusPayload += String(F("\"status\":\"available\","));
-  statusPayload += String(F("\"espVersion\":")) + String(haspVersion) + String(F(","));
+  statusPayload += String(F("\"espVersion\":")) + String(config.getHaspVersion()) + String(F(","));
   if (updateEspAvailable)
   {
     statusPayload += String(F("\"updateEspAvailable\":true,"));
@@ -453,7 +455,7 @@ void MQTTClass::publishStateTopic(String msg) { mqttClient.publish(_stateTopic, 
 void MQTTClass::publishStatusTopic(String msg) { mqttClient.publish(_statusTopic, msg); }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void MQTTClass::publishButtonEvent(String page, String buttonID, String newState) 
+void MQTTClass::publishButtonEvent(String page, String buttonID, String newState)
 { // Publish a message that buttonID on page is now newState
   String mqttButtonTopic = _stateTopic + "/p[" + page + "].b[" + buttonID + "]";
   mqttClient.publish(mqttButtonTopic, newState);
@@ -461,7 +463,7 @@ void MQTTClass::publishButtonEvent(String page, String buttonID, String newState
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void MQTTClass::publishButtonJSONEvent(String page, String buttonID, String newState) 
+void MQTTClass::publishButtonJSONEvent(String page, String buttonID, String newState)
 { // Publish a JSON message stating button = newState, on the State JSON Topic
   String mqttButtonJSONEvent = String(F("{\"event\":\"p[")) + String(page) + String(F("].b[")) + String(buttonID) + String(F("]\", \"value\":\"")) + newState + String(F("""}"));
   mqttClient.publish(_stateJSONTopic, mqttButtonJSONEvent);
@@ -472,7 +474,7 @@ void MQTTClass::publishStatePage(String page)
 { // Publish a page message on the State Topic
   String mqttPageTopic = _stateTopic + "/page";
   mqttClient.publish(mqttPageTopic, page);
-  debug.printLn(MQTT, String(F("MQTT OUT: '")) + mqttPageTopic + "' : '" + page + "'");  
+  debug.printLn(MQTT, String(F("MQTT OUT: '")) + mqttPageTopic + "' : '" + page + "'");
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
