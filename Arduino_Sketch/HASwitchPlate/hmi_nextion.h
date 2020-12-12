@@ -21,14 +21,54 @@ static const bool     useCache = false;    // when false, disable all the _pageC
 static const uint8_t  maxCacheCount = 14;  // or 18?
 static const uint16_t maxCacheSize = 2100; // 2047; // 18 of 3000 does crash = softloop. 13 of 2600 does too
 
+// 11, 8, 11, 10, 8, 8, 8, 10, 11, 7, 11, 8,
+// 7, 11, 15, 8, 13, 18
+
+// 12 pages, 7-11 buttons per page, 40 bytes per button. mmm
+// pco .2, bco .2, font .1, text .40(!)
+// 45 * 18 * 18 = 14.5kB; 45 * 8 * 12 = 4.3kB;
+// do we want a hint from the user?
+
+typedef struct _button_struct {
+  // GCC prefers a uint32_t near the top of a struct. we don't have one.
+  char *txt;
+  uint8_t txtlen; // limit 255 characters!
+  uint8_t font;
+  uint16_t pco;
+  uint16_t bco;
+  uint16_t pco2;
+  uint16_t bco2;
+} button_t; // one per button per page
+
+typedef struct _have_struct {
+  uint32_t font;
+  uint32_t txt;
+  uint32_t pco;
+  uint32_t bco;
+  uint32_t pco2;
+  uint32_t bco2;
+} have_t; // one (for all buttons) per page
+
+// bool is usually stored as uint8_t, so pivot and use a uint32_t to store 32 of them.
+// Gerard is hand picking these constants for HIS display. This should be made more flexible before uploading to GitHub, eh?
+static const uint8_t _cachePageCount = 14;
+static const uint8_t _cacheButtonCount = 12;
+
 
 class hmiNextionClass {
 private:
 public:
   ////////////////////////////////////////////////////////////////////////////////////////////////////
   // constructor
-  hmiNextionClass(void) { _alive = false; }
-  
+  hmiNextionClass(void)
+  {
+    _alive = false;
+    // set our data structures to zero
+    // on esp32 is bzero() more efficient than memset()?
+    memset(&_cached, 0x00, sizeof(button_t) * _cachePageCount * _cacheButtonCount );
+    memset(&_cache_has, 0x00, sizeof(have_t) * _cachePageCount );
+  }
+
   ////////////////////////////////////////////////////////////////////////////////////////////////////
   // destructor
   ~hmiNextionClass(void)
@@ -135,12 +175,23 @@ protected:
   uint8_t  _returnBuffer[128];          // Byte array to pass around data coming from the panel
   String   _mqttGetSubtopic;            // MQTT subtopic for incoming commands requesting .val
   String   _mqttGetSubtopicJSON;        // MQTT object buffer for JSON status when requesting .val
-    
+
 
   bool     _pageIsGlobal[maxCacheCount]; // when true buttons on page are global-scope, when false they are local-scope
   char*    _pageCache[maxCacheCount];    // malloc'd array holding the JSON of the page
   uint16_t _pageCacheLen[maxCacheCount]; // length of malloc'd array to help avoid (*NULL)
+  button_t _cached[_cachePageCount][_cacheButtonCount];
+  have_t _cache_has[_cachePageCount];
   //static char hopeless[maxCacheSize];  // debugging
+  /*
+  uint8_t  _cacheFont[cachePageCount][cacheButtonCount];
+  uint16_t _cachePCO[cachePageCount][cacheButtonCount];
+  uint16_t _cacheBCO[cachePageCount][cacheButtonCount];
+  uint16_t _cachePCO2[cachePageCount][cacheButtonCount];
+  uint16_t _cacheBCO2[cachePageCount][cacheButtonCount];
+  char*    _cacheText[cachePageCount][cacheButtonCount];
+  */
+
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////
   void _sendCmd(String cmd);
@@ -156,4 +207,35 @@ protected:
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////
   void _appendCmd(int page, String cmd);
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+  bool _isCachedFontValid(uint8_t page, uint8_t button);
+  uint8_t _getCachedFont(uint8_t page, uint8_t button);
+  void _setCachedFont(uint8_t page, uint8_t button, uint8_t newFont);
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+  bool _isCachedPCOValid(uint8_t page, uint8_t button);
+  uint16_t _getCachedPCO(uint8_t page, uint8_t button);
+  void _setCachedPCO(uint8_t page, uint8_t button, uint16_t newColour);
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+  bool _isCachedBCOValid(uint8_t page, uint8_t button);
+  uint16_t _getCachedBCO(uint8_t page, uint8_t button);
+  void _setCachedBCO(uint8_t page, uint8_t button, uint16_t newColour);
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+  bool _isCachedPCO2Valid(uint8_t page, uint8_t button);
+  uint16_t _getCachedPCO2(uint8_t page, uint8_t button);
+  void _setCachedPCO2(uint8_t page, uint8_t button, uint16_t newColour);
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+  bool _isCachedBCO2Valid(uint8_t page, uint8_t button);
+  uint16_t _getCachedBCO2(uint8_t page, uint8_t button);
+  void _setCachedBCO2(uint8_t page, uint8_t button, uint16_t newColour);
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+  bool _isCachedTxtValid(uint8_t page, uint8_t button);
+  char *_getCachedTxt(uint8_t page, uint8_t button);
+  void _setCachedTxt(uint8_t page, uint8_t button, const char *newText);
+  bool _helperTxtMalloc(uint8_t page, uint8_t button, const char *newText);
 };

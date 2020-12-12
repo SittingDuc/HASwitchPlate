@@ -38,9 +38,8 @@ extern String printHex8(String data, uint8_t length); // TODO: class me
 extern bool updateCheck();
 extern void espReset();
 
-// TODO: Class These!
-extern uint32_t tftFileSize;                           // Filesize for TFT firmware upload
-
+// Is this ours or webClass'?
+uint32_t tftFileSize = 0;                           // Filesize for TFT firmware upload
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void hmiNextionClass::begin(void)
@@ -83,6 +82,10 @@ void hmiNextionClass::begin(void)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void hmiNextionClass::loop(void)
 { // called in the main code loop, handles our periodic code
+  if( !_alive )
+  {
+    begin();
+  }
   if (handleInput())
   { // Process user input from HMI
     processInput();
@@ -141,7 +144,7 @@ void hmiNextionClass::reset()
     debug.printLn(F("ERROR: Rebooting LCD completed, but LCD is not responding."));
   }
   mqtt.publishStatusTopic("OFF");
-    
+
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -852,4 +855,244 @@ void hmiNextionClass::_appendCmd(int page, String cmd)
   //cacheCommands.clear();
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// already declared somewhere in Arduino. Neat!
+//#define BIT(x) (1UL<<(x))
 
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool hmiNextionClass::_isCachedFontValid(uint8_t page, uint8_t button)
+{
+  // depend on C short-cut evaluation; if the range checks are false
+  // then the array dereference is never attempted
+  if( page >= _cachePageCount || button >= _cacheButtonCount || 0 == (_cache_has[page].font & BIT(button)) )
+  {
+    return false;
+  }
+  else
+  {
+    return true;
+  }
+}
+uint8_t hmiNextionClass::_getCachedFont(uint8_t page, uint8_t button)
+{
+  if( !_isCachedFontValid(page,button) )
+  {
+    return 6; // we do not have a defined "no font here" value? 6 is a nice proportional font, it will do.
+  }
+  return _cached[page][button].font;
+}
+void hmiNextionClass::_setCachedFont(uint8_t page, uint8_t button, uint8_t newFont)
+{
+  if( page >= _cachePageCount || button >= _cacheButtonCount ) { return; } // no
+  // bounds check? Gerard has 10 fonts loaded today
+  _cache_has[page].font |= BIT(button);
+  _cached[page][button].font=newFont;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool hmiNextionClass::_isCachedPCOValid(uint8_t page, uint8_t button)
+{
+  if( page >= _cachePageCount || button >= _cacheButtonCount || 0 == (_cache_has[page].pco & BIT(button)) )
+  {
+    return false;
+  }
+  else
+  {
+    return true;
+  }
+}
+uint16_t hmiNextionClass::_getCachedPCO(uint8_t page, uint8_t button)
+{
+  if( !_isCachedPCOValid(page,button) )
+  {
+    return 59164; // all colours are legal, so pick one. 59164 = RGB(0xe0,0xe0,0xe0) grey
+  }
+  return _cached[page][button].pco;
+}
+void hmiNextionClass::_setCachedPCO(uint8_t page, uint8_t button, uint16_t newColour)
+{
+  if( page >= _cachePageCount || button >= _cacheButtonCount ) { return; } // no
+  // all 65536 colours are legal, so no bounds check here
+  _cache_has[page].pco |= BIT(button);
+  _cached[page][button].pco=newColour;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool hmiNextionClass::_isCachedBCOValid(uint8_t page, uint8_t button)
+{
+  if( page >= _cachePageCount || button >= _cacheButtonCount || 0 == (_cache_has[page].bco & BIT(button)) )
+  {
+    return false;
+  }
+  else
+  {
+    return true;
+  }
+}
+uint16_t hmiNextionClass::_getCachedBCO(uint8_t page, uint8_t button)
+{
+  if( !_isCachedBCOValid(page,button) )
+  {
+    return 8; // all colours are legal, so pick one. 8 = RGB(0x0,0x0,0x40) midnightBlue
+  }
+  return _cached[page][button].bco;
+}
+void hmiNextionClass::_setCachedBCO(uint8_t page, uint8_t button, uint16_t newColour)
+{
+  if( page >= _cachePageCount || button >= _cacheButtonCount ) { return; } // no
+  _cache_has[page].bco |= BIT(button);
+  _cached[page][button].bco=newColour;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool hmiNextionClass::_isCachedPCO2Valid(uint8_t page, uint8_t button)
+{
+  if( page >= _cachePageCount || button >= _cacheButtonCount || 0 == (_cache_has[page].pco2 & BIT(button)) )
+  {
+    return false;
+  }
+  else
+  {
+    return true;
+  }
+}
+uint16_t hmiNextionClass::_getCachedPCO2(uint8_t page, uint8_t button)
+{
+  if( !_isCachedPCO2Valid(page,button) )
+  {
+    return 59164; // all colours are legal, so pick one. 59164 = RGB(0xe0,0xe0,0xe0) grey
+  }
+  return _cached[page][button].pco2;
+
+}
+void hmiNextionClass::_setCachedPCO2(uint8_t page, uint8_t button, uint16_t newColour)
+{
+  if( page >= _cachePageCount || button >= _cacheButtonCount ) { return; } // no
+  _cache_has[page].pco2 |= BIT(button);
+  _cached[page][button].pco2=newColour;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool hmiNextionClass::_isCachedBCO2Valid(uint8_t page, uint8_t button)
+{
+  if( page >= _cachePageCount || button >= _cacheButtonCount || 0 == (_cache_has[page].bco2 & BIT(button)) )
+  {
+    return false;
+  }
+  else
+  {
+    return true;
+  }
+}
+uint16_t hmiNextionClass::_getCachedBCO2(uint8_t page, uint8_t button)
+{
+  if( !_isCachedBCOValid(page,button) )
+  {
+    return 8; // all colours are legal, so pick one. 8 = RGB(0x0,0x0,0x40) midnightBlue
+  }
+  return _cached[page][button].bco2;
+}
+void hmiNextionClass::_setCachedBCO2(uint8_t page, uint8_t button, uint16_t newColour)
+{
+  if( page >= _cachePageCount || button >= _cacheButtonCount ) { return; } // no
+  _cache_has[page].bco2 |= BIT(button);
+  _cached[page][button].bco2=newColour;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool hmiNextionClass::_isCachedTxtValid(uint8_t page, uint8_t button)
+{
+  // dereference the pointer last eh? fewer sigsegv is happier sigsegv
+  if( page >= _cachePageCount || button >= _cacheButtonCount || 0 == (_cache_has[page].txt & BIT(button)) || 0 == _cached[page][button].txtlen || NULL == _cached[page][button].txt )
+  {
+    return false;
+  }
+  else
+  {
+    return true;
+  }
+}
+char *hmiNextionClass::_getCachedTxt(uint8_t page, uint8_t button)
+{
+  if( !_isCachedTxtValid(page,button) )
+  {
+    return NULL; // explicitly not valid
+  }
+  return _cached[page][button].txt;
+}
+
+bool hmiNextionClass::_helperTxtMalloc(uint8_t page, uint8_t button, const char *newText)
+{
+  uint8_t newLen = strlen(newText);
+  if( newLen < 20 )
+  {
+    _cached[page][button].txtlen=20; // one more for trailing '\0'
+  }
+  else if( newLen < 40 )
+  {
+    _cached[page][button].txtlen=40;
+  }
+  else if( newLen < 80 )
+  {
+    _cached[page][button].txtlen=80;
+  }
+  else if( newLen < 160 )
+  {
+    _cached[page][button].txtlen=160;
+  }
+  else if( newLen < 240 )
+  {
+    _cached[page][button].txtlen=240;
+  }
+  else
+  {
+    debug.printLn(HMI,String(F("NMI Cache: Unable to handle request for overly long .txt field! Given length ")) + String(newLen) );
+    return false;
+  }
+  _cached[page][button].txt = (char*) malloc( sizeof(char) * _cached[page][button].txtlen );
+  if( NULL == _cached[page][button].txt )
+  {
+    debug.printLn(HMI,String(F("Internal: [ERROR] Failed to malloc .txt cache, wanted ")) + _cached[page][button].txtlen);
+    _cached[page][button].txtlen=0;
+    // do we unset _cache_has bit too?
+    return false;
+  }
+  return true;
+}
+
+void hmiNextionClass::_setCachedTxt(uint8_t page, uint8_t button, const char *newText)
+{
+  // fragment the RAM!
+  // so, we cannot use this function to zero a string by passing NULL
+  // instead, pass the empty string - "", a valid pointer dereferencing length zero.
+  if( page >= _cachePageCount || button >= _cacheButtonCount || NULL == newText ) { return; } // no
+
+  if( 0 == _cached[page][button].txtlen || NULL == _cached[page][button].txt )
+  { // no existing string, malloc a new one
+    _helperTxtMalloc(page,button,newText);
+  }
+  else if( _cached[page][button].txtlen >= strlen(newText) )
+  { // existing string but it is too short, so fragment the ram
+    free(_cached[page][button].txt);
+    _cached[page][button].txt=NULL;
+    _cached[page][button].txtlen=0;
+
+    _helperTxtMalloc(page,button,newText);
+  }
+  else
+  {
+    // existing string and it has space to hold the new text
+  }
+
+  // Paranoia
+  if( NULL == _cached[page][button].txt )
+  {
+    debug.printLn(HMI,String(F("Internal: [ERROR] .txt cache NULL at a place where it really should not be.")));
+    return;
+  }
+
+  strncpy(_cached[page][button].txt, newText, strlen(newText));
+  // enforce NUL-termination
+  _cached[page][button].txt[_cached[page][button].txtlen-1] = '\0';
+
+}
