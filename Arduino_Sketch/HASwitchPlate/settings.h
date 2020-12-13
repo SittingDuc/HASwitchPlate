@@ -44,10 +44,23 @@
 #define RECONNECT_TIMEOUT (15)            // Timeout for WiFi reconnection attempts in seconds
 #define UPDATE_CHECK_INTERVAL (12*ANHOUR); // Time in msec between update checks (12 hours)
 
+// if your ESP is on an isolated network with no internet access, set UPDATE_CHECK_ENABLE false
+// and skip the attempts to connect to the live internet for an updated version, because
+// that connection will just fail. Note, brackets matter this time
+#define UPDATE_CHECK_ENABLE (true)  // if true, check The Internet for new versions
+
+// URL for auto-update "version.json"
+#define DEFAULT_URL_UPDATE ("http://haswitchplate.com/update/version.json")
+// Default link to compiled Arduino firmware image
+#define DEFAULT_URL_ARDUINO_FW ("http://haswitchplate.com/update/HASwitchPlate.ino.d1_mini.bin")
+// Default link to compiled Nextion firmware images
+#define DEFAULT_URL_LCD_FW ("http://haswitchplate.com/update/HASwitchPlate.tft")
+
 #define NEXTION_REPORT_PAGE0 (false)       // If false, don't report page 0 sendme
 #define NEXTION_RETRY_MAX (5)              // Attempt to connect to panel this many times
 #define NEXTION_CHECK_INTERVAL (5*ASECOND) // Time in msec between nextion connection checks
 #define NEXTION_RESET_PIN (D6)             // Pin for Nextion power rail switch (GPIO12/D6)
+#define NEXTION_CACHE_ENABLED (false)      // If true, cache Nextion Page Buttons in the ESP (eats RAM)
 
 #define MQTT_MAX_PACKET_SIZE (4096)             // Size of buffer for incoming MQTT message
 #define MQTT_STATUS_UPDATE_INTERVAL (5*AMINUTE) // Time in msec between publishing MQTT status updates (5 minutes)

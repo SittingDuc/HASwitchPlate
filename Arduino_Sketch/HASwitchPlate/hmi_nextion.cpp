@@ -55,14 +55,16 @@ void hmiNextionClass::begin(void)
   _activePage          = 0;
   _reportPage0         = NEXTION_REPORT_PAGE0;
 
+#if NEXTION_CACHE_ENABLED==(true)
   // setting the cache up goes here too
-  for( int idx=0; idx<maxCacheCount; idx++)
+  for( int idx=0; idx<_cachePageCount; idx++)
   {
     _pageCache[idx]=NULL; // null terminate each cache at power-on
     _pageCacheLen[idx]=0;
     _pageIsGlobal[idx]=false; // default to local scope
   }
   // any pages that default to GlobalScope could go here too
+#endif // NEXTION_CACHE_ENABLED
 
   while (!_lcdConnected && (millis() < 5000))
   { // Wait up to 5 seconds for serial input from LCD
@@ -168,12 +170,13 @@ void hmiNextionClass::getAttr(String hmiAttribute)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void hmiNextionClass::sendCmd(String cmd)
 {
+#if NEXTION_CACHE_ENABLED!=(true)
   if( !useCache )
   { // No cache, just send all commands straight to the panel
     _sendCmd(cmd);
     return;
   }
-
+#else
   // Yes cache, only send some commands to the panel
 
   // p[1].b[1].text="Hello World"
@@ -208,6 +211,7 @@ void hmiNextionClass::sendCmd(String cmd)
   { // not a button / attribute, send it to the panel
     _sendCmd(cmd);
   }
+#endif // NEXTION_CACHE_ENABLED
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -613,12 +617,13 @@ bool hmiNextionClass::otaResponse()
 void hmiNextionClass::debug_page_cache(void)
 {
   if( !useCache ) { return; }
-
+#if NEXTION_CACHE_ENABLED==(true)
   debug.printLn(String(F("")));
-  for( int idx=0;idx<maxCacheCount;idx++) {
+  for( int idx=0;idx<_cachePageCount;idx++) {
     debug.printLn(String(F("debug [")) + idx + String(F("]=")) + _pageCacheLen[idx] );
   }
   debug.printLn(String(F("")));
+#endif // NEXTION_CACHE_ENABLED
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -640,7 +645,8 @@ void hmiNextionClass::changePage(uint8_t page) {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void hmiNextionClass::setPageGlobal( uint8_t page, bool newFlag )
 {
-  if( page < maxCacheCount )
+#if NEXTION_CACHE_ENABLED==(true)
+  if( page < _cachePageCount )
   {
     _pageIsGlobal[page] = newFlag;
   }
@@ -648,6 +654,7 @@ void hmiNextionClass::setPageGlobal( uint8_t page, bool newFlag )
   {
     debug.printLn(HMI,String(F("Cache cannot be global for high-order page: ")) + page );
   }
+#endif // NEXTION_CACHE_ENABLED
 }
 
 
@@ -710,24 +717,77 @@ void hmiNextionClass::_setSpeed()
 void hmiNextionClass::_replayCmd(void)
 { // play entries from the cache to the panel
   if( !useCache ) { return; }
+#if NEXTION_CACHE_ENABLED==(true)
   //  debug.printLn(HMI,String(F("--- Entry Point Replay Cmd ")) + _activePage);
   //  if( 1 == _activePage)
   //  {
   //    debug.printLn(HMI,String(F("--- Contents  ")) + _pageCache[_activePage]);
   //  }
-  if( _activePage >= maxCacheCount )
+  if( _activePage >= _cachePageCount )
   {
     debug.printLn(HMI, String(F("Cache cannot replay for high-order page: ")) + _activePage );
     return;
   }
+  // Q: how badly do all these strings composed this way chew our free RAM?
+  String preface=String(F("p[")) + _activePage + String(F("]."));
+  uint32_t bitIdx=1;
+  for( uint8_t idx=0; idx<_cacheButtonCount; idx++ )
+  {
+    // we need these a few times, so save them here
+    button_t *current = &(_cached[_activePage][idx]);
+    have_t *have = &(_cache_has[_activePage]);
+    String midface=String(F("b[")) + idx + String(F("]."));
+    if (have->font & bitIdx)
+    {
+      String resultant = preface + midface + String(F("font=")) + current->font;
+      _sendCmd(resultant);
+    }
+    if (have->pco & bitIdx)
+    {
+      String resultant = preface + midface + String(F("pco=")) + current->pco;
+      _sendCmd(resultant);
+    }
+    if (have->bco & bitIdx)
+    {
+      String resultant = preface + midface + String(F("bco=")) + current->bco;
+      _sendCmd(resultant);
+    }
+    if (have->pco2 & bitIdx)
+    {
+      String resultant = preface + midface + String(F("pco2=")) + current->pco2;
+      _sendCmd(resultant);
+    }
+    if (have->bco2 & bitIdx)
+    {
+      String resultant = preface + midface + String(F("bco2=")) + current->bco2;
+      _sendCmd(resultant);
+    }
+    if (have->xcen & bitIdx)
+    {
+      String resultant = preface + midface + String(F("xcen=")) + current->xcen;
+      _sendCmd(resultant);
+    }
+    // gate twice to reduce NULL dereferences
+    if (have->txt & bitIdx && current->txtlen > 0 )
+    {
+      String resultant = preface + midface + String(F("txt=")) + current->txt;
+      _sendCmd(resultant);
+    }
+    // we could count writes and delay here if we are overloading the LCD/Serial port
+
+    // increment our boolean selector
+    bitIdx <<= 1;
+  }
+
+  // Legacy Cache using JSON that sometimes fails:
   // Do nothing if the cache is empty
   if( _pageCache[_activePage] == NULL )
   {
     return;
   }
   // Do something if the cache is not.
-  //StaticJsonDocument<maxCacheSize> replayCommands;
-  DynamicJsonDocument replayCommands(maxCacheSize);
+  //StaticJsonDocument<_cacheBufferSize> replayCommands;
+  DynamicJsonDocument replayCommands(_cacheBufferSize);
   DeserializationError jsonError = deserializeJson(replayCommands, _pageCache[_activePage]);
   if (jsonError)
   { // Couldn't parse incoming JSON command
@@ -737,7 +797,6 @@ void hmiNextionClass::_replayCmd(void)
   {
     // we saved ram by not storing the p[x]. text, so re-add it here
     // can we do this with printf?
-    String preface=String("p[") + _activePage + String("].");
     JsonObject replayObj = replayCommands.as<JsonObject>();
     //JsonArray replayArray = replayCommands.as<JsonArray>();
     //    if( 1 == _activePage )
@@ -755,18 +814,20 @@ void hmiNextionClass::_replayCmd(void)
       delayMicroseconds(200); // Larger JSON objects can take a while to run through over serial,
     }                         // give the ESP and Nextion a moment to deal with life
   }
+#endif // NEXTION_CACHE_ENABLED
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void hmiNextionClass::_appendCmd(int page, String cmd)
 { // add entries to the cache, and pass input that is unsupported or for the activePage to the panel too
   if( !useCache ) { return; }
+#if NEXTION_CACHE_ENABLED==(true)
   //  debug.printLn(HMI,String(F("aCmd ")) + page + "  " + cmd);
   // our input is like p[1].b[1].txt="Hello World"
   // or p[20].b[13].pco=65535
   // we save ram by not storing the page number text
 
-  if( page >= maxCacheCount )
+  if( page >= _cachePageCount )
   {
     debug.printLn(HMI,String(F("Cache not stored for high-order page: ")) + page );
     return;
@@ -775,24 +836,81 @@ void hmiNextionClass::_appendCmd(int page, String cmd)
   String object=getSubtringField(cmd,'=',0);
   String value=getSubtringField(cmd,'=',1);
 
-  int nom = 0;
-  char buffer[maxCacheSize];
+  int objectOffset = 0;
+  char buffer[_cacheBufferSize];
 
   if( cmd.charAt(4)==']' )
   { // page 10-99
-    nom=6;
+    objectOffset=6;
   }
   else
   { // page 0-9
-    nom=5;
+    objectOffset=5;
   }
-  String pageFree =object.substring(nom);
+  String pageFree =object.substring(objectOffset);
+  if( pageFree.startsWith("b[") && (pageFree.charAt(3)==']' || pageFree.charAt(4)==']'))
+  {
+    int tgtButton;
+    // who wants to bet there is a cleaner way to turn b[0] to b[99] into integer 0 to 99?
+    if(pageFree.charAt(3)==']')
+    {
+      tgtButton=(pageFree.charAt(2)-'0');
+      objectOffset=5;
+    }
+    else
+    {
+      tgtButton=((pageFree.charAt(2)-'0')*10) + (pageFree.charAt(3)-'0');
+      objectOffset=6;
+    }
+    if(tgtButton < _cacheButtonCount )
+    { // hokay, we have a button we can cache
+      String buttonFree =pageFree.substring(objectOffset);
+      if( buttonFree.startsWith("txt"))
+      {
+        _setCachedTxt(page, tgtButton, value.c_str());
+        return;
+      }
+      if( buttonFree.startsWith("font"))
+      {
+        _setCachedFont(page, tgtButton, value.toInt());
+        return;
+      }
+      if( buttonFree.startsWith("pco2"))
+      { // nb: pco2 first, as startsWith "pco" matches both
+        _setCachedPCO2(page, tgtButton, value.toInt());
+        return;
+      }
+      if( buttonFree.startsWith("bco2"))
+      { // nb: bco2 first, as startsWith "bco" matches both
+        _setCachedBCO2(page, tgtButton, value.toInt());
+        return;
+      }
+      if( buttonFree.startsWith("pco"))
+      { // nb: pco second
+        _setCachedPCO(page, tgtButton, value.toInt());
+        return;
+      }
+      if( buttonFree.startsWith("bco"))
+      { // nb: bco second
+        _setCachedBCO(page, tgtButton, value.toInt());
+        return;
+      }
+      if( buttonFree.startsWith("xcen"))
+      {
+        _setCachedXcen(page, tgtButton, value.toInt());
+        return;
+      }
+      debug.printLn(HMI,String(F("Internal: [DEBUG] input token was not loaded into new cache. Old Cache takes over >>")) + cmd + String(F("<<")));
+      // so, no matches found, fall down to the legacy code
+    }
+  }
 
   //  debug.printLn(HMI,String(F("--- debug ---  ")) + pageFree + "   " + value);
 
+  // Legacy Cache using JSON that sometimes fails:
   // In the _pageCache[page], find pageFree entry and if it exists, replace it with pageFree+"="+value. If it does not exist, add it.
-  //StaticJsonDocument<maxCacheSize> cacheCommands;
-  DynamicJsonDocument cacheCommands(maxCacheSize);
+  //StaticJsonDocument<_cacheBufferSize> cacheCommands;
+  DynamicJsonDocument cacheCommands(_cacheBufferSize);
   if( _pageCache[page] != NULL)
   {
     DeserializationError jsonError = deserializeJson(cacheCommands, _pageCache[page]);
@@ -811,8 +929,8 @@ void hmiNextionClass::_appendCmd(int page, String cmd)
     }
   }
   cacheCommands[pageFree]=value;
-  int count=serializeJson(cacheCommands, buffer, maxCacheSize-1);
-  buffer[maxCacheSize-1]='\0'; // force null termination
+  int count=serializeJson(cacheCommands, buffer, _cacheBufferSize-1);
+  buffer[_cacheBufferSize-1]='\0'; // force null termination
   int buflen=strlen(buffer);
 
   if( count > 0 && buflen > _pageCacheLen[page] )
@@ -853,7 +971,10 @@ void hmiNextionClass::_appendCmd(int page, String cmd)
   }
   // and garbage collect
   //cacheCommands.clear();
+#endif // NEXTION_CACHE_ENABLED
 }
+
+#if NEXTION_CACHE_ENABLED==(true)
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // already declared somewhere in Arduino. Neat!
@@ -887,6 +1008,36 @@ void hmiNextionClass::_setCachedFont(uint8_t page, uint8_t button, uint8_t newFo
   // bounds check? Gerard has 10 fonts loaded today
   _cache_has[page].font |= BIT(button);
   _cached[page][button].font=newFont;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool hmiNextionClass::_isCachedXcenValid(uint8_t page, uint8_t button)
+{
+  // depend on C short-cut evaluation; if the range checks are false
+  // then the array dereference is never attempted
+  if( page >= _cachePageCount || button >= _cacheButtonCount || 0 == (_cache_has[page].font & BIT(button)) )
+  {
+    return false;
+  }
+  else
+  {
+    return true;
+  }
+}
+uint8_t hmiNextionClass::_getCachedXcen(uint8_t page, uint8_t button)
+{
+  if( !_isCachedXcenValid(page,button) )
+  {
+    return 0; // we do not have a defined "no xcen here" value? "0 left aligned" will do
+  }
+  return _cached[page][button].xcen;
+}
+void hmiNextionClass::_setCachedXcen(uint8_t page, uint8_t button, uint8_t newXcen)
+{
+  if( page >= _cachePageCount || button >= _cacheButtonCount ) { return; } // no
+  // bounds check?
+  _cache_has[page].xcen |= BIT(button);
+  _cached[page][button].xcen=newXcen;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1024,31 +1175,20 @@ char *hmiNextionClass::_getCachedTxt(uint8_t page, uint8_t button)
 bool hmiNextionClass::_helperTxtMalloc(uint8_t page, uint8_t button, const char *newText)
 {
   uint8_t newLen = strlen(newText);
-  if( newLen < 20 )
+  if( newLen < 8 )
   {
-    _cached[page][button].txtlen=20; // one more for trailing '\0'
+  _cached[page][button].txtlen = 8;
   }
-  else if( newLen < 40 )
+  else if( newLen < 250 )
   {
-    _cached[page][button].txtlen=40;
-  }
-  else if( newLen < 80 )
-  {
-    _cached[page][button].txtlen=80;
-  }
-  else if( newLen < 160 )
-  {
-    _cached[page][button].txtlen=160;
-  }
-  else if( newLen < 240 )
-  {
-    _cached[page][button].txtlen=240;
+    _cached[page][button].txtlen = 16 * ((newLen/16)+1);
   }
   else
   {
     debug.printLn(HMI,String(F("NMI Cache: Unable to handle request for overly long .txt field! Given length ")) + String(newLen) );
     return false;
   }
+  //debug.printLn(HMI,String(F("Internal: [DEBUG] Going to malloc .txt length ")) + _cached[page][button].txtlen);
   _cached[page][button].txt = (char*) malloc( sizeof(char) * _cached[page][button].txtlen );
   if( NULL == _cached[page][button].txt )
   {
@@ -1069,10 +1209,12 @@ void hmiNextionClass::_setCachedTxt(uint8_t page, uint8_t button, const char *ne
 
   if( 0 == _cached[page][button].txtlen || NULL == _cached[page][button].txt )
   { // no existing string, malloc a new one
+    //debug.printLn(HMI,String(F("Internal: [DEBUG] cache says new txt to ")) + strlen(newText));
     _helperTxtMalloc(page,button,newText);
   }
-  else if( _cached[page][button].txtlen >= strlen(newText) )
+  else if( _cached[page][button].txtlen < strlen(newText) )
   { // existing string but it is too short, so fragment the ram
+    //debug.printLn(HMI,String(F("Internal: [DEBUG] cache says grow txt from ")) + _cached[page][button].txtlen + String(F(" to ")) + strlen(newText));
     free(_cached[page][button].txt);
     _cached[page][button].txt=NULL;
     _cached[page][button].txtlen=0;
@@ -1081,18 +1223,23 @@ void hmiNextionClass::_setCachedTxt(uint8_t page, uint8_t button, const char *ne
   }
   else
   {
+    //debug.printLn(HMI,String(F("Internal: [DEBUG] cache says keep txt, from ")) + _cached[page][button].txtlen + String(F(" holds ")) + strlen(newText));
     // existing string and it has space to hold the new text
   }
 
   // Paranoia
+  // (actually, if the malloc failed, we might get here)
   if( NULL == _cached[page][button].txt )
   {
     debug.printLn(HMI,String(F("Internal: [ERROR] .txt cache NULL at a place where it really should not be.")));
     return;
   }
 
+  _cache_has[page].txt |= BIT(button);
   strncpy(_cached[page][button].txt, newText, strlen(newText));
   // enforce NUL-termination
   _cached[page][button].txt[_cached[page][button].txtlen-1] = '\0';
-
+  _cached[page][button].txt[strlen(newText)] = '\0';
 }
+
+#endif // NEXTION_CACHE_ENABLED

@@ -622,7 +622,7 @@ void configClearSaved()
 bool updateCheck()
 { // firmware update check
   // Gerard has placed nodes on an isolated network. Connecting to the live internet is verboten and unpossible. So skip the pointless check
-#ifdef DISABLE_UPDATE_CHECK
+#if UPDATE_CHECK_ENABLE==(false)
   updateEspAvailable = false;
   updateLcdAvailable = false;
 #else

@@ -17,9 +17,13 @@
 #include <Arduino.h>
 
 // Ours. But can't be inside the class?
-static const bool     useCache = false;    // when false, disable all the _pageCache code (be like the Upstream project)
-static const uint8_t  maxCacheCount = 14;  // or 18?
-static const uint16_t maxCacheSize = 2100; // 2047; // 18 of 3000 does crash = softloop. 13 of 2600 does too
+static const bool     useCache = NEXTION_CACHE_ENABLED;    // when false, disable all the _pageCache code (be like the Upstream project)
+
+#if NEXTION_CACHE_ENABLED==(true)
+// Gerard is hand picking these constants for HIS display. This should be made more flexible before uploading to GitHub, eh?
+static const uint8_t _cachePageCount = 14;
+static const uint8_t _cacheButtonCount = 12;
+static const uint16_t _cacheBufferSize = 2100; // 2047; // 18 of 3000 does crash = softloop. 13 of 2600 does too
 
 // 11, 8, 11, 10, 8, 8, 8, 10, 11, 7, 11, 8,
 // 7, 11, 15, 8, 13, 18
@@ -28,31 +32,33 @@ static const uint16_t maxCacheSize = 2100; // 2047; // 18 of 3000 does crash = s
 // pco .2, bco .2, font .1, text .40(!)
 // 45 * 18 * 18 = 14.5kB; 45 * 8 * 12 = 4.3kB;
 // do we want a hint from the user?
+// question: do pages have attributes that aren't buttons / button-like?
+// i.e. do we need a second struct for storing other metadata?
 
 typedef struct _button_struct {
   // GCC prefers a uint32_t near the top of a struct. we don't have one.
   char *txt;
   uint8_t txtlen; // limit 255 characters!
   uint8_t font;
+  uint8_t xcen;
   uint16_t pco;
   uint16_t bco;
   uint16_t pco2;
   uint16_t bco2;
 } button_t; // one per button per page
 
+// bool is usually stored as uint8_t, so pivot and use a uint32_t to store 32 of them.
+// use bit 0 for page0, bit1 for page1 etc. limit of 32 pages then
 typedef struct _have_struct {
   uint32_t font;
+  uint32_t xcen;
   uint32_t txt;
   uint32_t pco;
   uint32_t bco;
   uint32_t pco2;
   uint32_t bco2;
 } have_t; // one (for all buttons) per page
-
-// bool is usually stored as uint8_t, so pivot and use a uint32_t to store 32 of them.
-// Gerard is hand picking these constants for HIS display. This should be made more flexible before uploading to GitHub, eh?
-static const uint8_t _cachePageCount = 14;
-static const uint8_t _cacheButtonCount = 12;
+#endif // NEXTION_CACHE_ENABLED
 
 
 class hmiNextionClass {
@@ -63,10 +69,12 @@ public:
   hmiNextionClass(void)
   {
     _alive = false;
+#if NEXTION_CACHE_ENABLED==(true)
     // set our data structures to zero
     // on esp32 is bzero() more efficient than memset()?
     memset(&_cached, 0x00, sizeof(button_t) * _cachePageCount * _cacheButtonCount );
     memset(&_cache_has, 0x00, sizeof(have_t) * _cachePageCount );
+#endif // NEXTION_CACHE_ENABLED
   }
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -74,8 +82,9 @@ public:
   ~hmiNextionClass(void)
   {
     _alive = false;
+#if NEXTION_CACHE_ENABLED==(true)
     // Free any memory we alloc'd
-    for( int idx=0;idx<maxCacheCount;idx++)
+    for( int idx=0;idx<_cachePageCount;idx++)
     {
       if( _pageCache[idx] )
       {
@@ -84,6 +93,7 @@ public:
         _pageCacheLen[idx]=0;
       }
     }
+#endif // NEXTION_CACHE_ENABLED
   }
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -177,22 +187,6 @@ protected:
   String   _mqttGetSubtopicJSON;        // MQTT object buffer for JSON status when requesting .val
 
 
-  bool     _pageIsGlobal[maxCacheCount]; // when true buttons on page are global-scope, when false they are local-scope
-  char*    _pageCache[maxCacheCount];    // malloc'd array holding the JSON of the page
-  uint16_t _pageCacheLen[maxCacheCount]; // length of malloc'd array to help avoid (*NULL)
-  button_t _cached[_cachePageCount][_cacheButtonCount];
-  have_t _cache_has[_cachePageCount];
-  //static char hopeless[maxCacheSize];  // debugging
-  /*
-  uint8_t  _cacheFont[cachePageCount][cacheButtonCount];
-  uint16_t _cachePCO[cachePageCount][cacheButtonCount];
-  uint16_t _cacheBCO[cachePageCount][cacheButtonCount];
-  uint16_t _cachePCO2[cachePageCount][cacheButtonCount];
-  uint16_t _cacheBCO2[cachePageCount][cacheButtonCount];
-  char*    _cacheText[cachePageCount][cacheButtonCount];
-  */
-
-
   ////////////////////////////////////////////////////////////////////////////////////////////////////
   void _sendCmd(String cmd);
 
@@ -208,10 +202,25 @@ protected:
   ////////////////////////////////////////////////////////////////////////////////////////////////////
   void _appendCmd(int page, String cmd);
 
+#if NEXTION_CACHE_ENABLED==(true)
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+  // Cache, Legacy version
+  bool     _pageIsGlobal[_cachePageCount]; // when true buttons on page are global-scope, when false they are local-scope
+  char*    _pageCache[_cachePageCount];    // malloc'd array holding the JSON of the page
+  uint16_t _pageCacheLen[_cachePageCount]; // length of malloc'd array to help avoid (*NULL)
+  //static char hopeless[_cacheBufferSize];  // debugging
+  // Cache, new version spelling out button attributes
+  button_t _cached[_cachePageCount][_cacheButtonCount]; // specialised cache of button attributes
+  have_t _cache_has[_cachePageCount]; // flags indicating which entries in the specialised cache are valid
+
   ////////////////////////////////////////////////////////////////////////////////////////////////////
   bool _isCachedFontValid(uint8_t page, uint8_t button);
   uint8_t _getCachedFont(uint8_t page, uint8_t button);
   void _setCachedFont(uint8_t page, uint8_t button, uint8_t newFont);
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+  bool _isCachedXcenValid(uint8_t page, uint8_t button);
+  uint8_t _getCachedXcen(uint8_t page, uint8_t button);
+  void _setCachedXcen(uint8_t page, uint8_t button, uint8_t newXcen);
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////
   bool _isCachedPCOValid(uint8_t page, uint8_t button);
@@ -238,4 +247,5 @@ protected:
   char *_getCachedTxt(uint8_t page, uint8_t button);
   void _setCachedTxt(uint8_t page, uint8_t button, const char *newText);
   bool _helperTxtMalloc(uint8_t page, uint8_t button, const char *newText);
+#endif // NEXTION_CACHE_ENABLED
 };
