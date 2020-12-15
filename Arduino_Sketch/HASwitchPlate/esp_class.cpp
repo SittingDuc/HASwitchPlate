@@ -13,6 +13,7 @@
 #include "common.h"
 #include <ESP8266httpUpdate.h>
 #include <ArduinoOTA.h>
+#include <ArduinoJson.h>
 
 
 // TODO: Class These!
@@ -20,12 +21,19 @@ extern const char wifiConfigPass[9] = WIFI_CONFIG_PASSWORD; // First-time config
 extern const char wifiConfigAP[14] = WIFI_CONFIG_AP;        // First-time config SSID
 extern const uint32_t connectTimeout = CONNECTION_TIMEOUT;       // Timeout for WiFi and MQTT connection attempts in seconds
 extern const uint32_t reConnectTimeout = RECONNECT_TIMEOUT;      // Timeout for WiFi reconnection attempts in seconds
-extern uint8_t espMac[6];                                        // Byte array to store our MAC address
+uint8_t espMac[6];                                        // Byte array to store our MAC address
 
-extern const uint32_t updateCheckInterval; // Time in msec between update checks (12 hours)
-extern bool updateEspAvailable;                    // Flag for update check to report new ESP FW version
-extern float updateEspAvailableVersion;                    // Float to hold the new ESP FW version number
-extern bool updateLcdAvailable;                    // Flag for update check to report new LCD FW version
+bool updateEspAvailable = false;                    // Flag for update check to report new ESP FW version
+float updateEspAvailableVersion;                    // Float to hold the new ESP FW version number
+bool updateLcdAvailable = false;                    // Flag for update check to report new LCD FW version
+uint32_t updateLcdAvailableVersion;                 // Int to hold the new LCD FW version number
+
+// URL for auto-update "version.json"
+const char UPDATE_URL[] = DEFAULT_URL_UPDATE;
+// Default link to compiled Arduino firmware image
+String espFirmwareUrl = DEFAULT_URL_ARDUINO_FW;
+// Default link to compiled Nextion firmware images
+String lcdFirmwareUrl = DEFAULT_URL_LCD_FW;
 
 
 

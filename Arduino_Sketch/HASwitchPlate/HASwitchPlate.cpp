@@ -43,34 +43,22 @@
 // TODO: Move some/all of these into the config class!
 const char wifiConfigPass[9] = WIFI_CONFIG_PASSWORD; // First-time config WPA2 password
 const char wifiConfigAP[14] = WIFI_CONFIG_AP;        // First-time config SSID
-const uint32_t updateCheckInterval = UPDATE_CHECK_INTERVAL; // Time in msec between update checks (12 hours)
-bool updateEspAvailable = false;                    // Flag for update check to report new ESP FW version
-float updateEspAvailableVersion;                    // Float to hold the new ESP FW version number
-bool updateLcdAvailable = false;                    // Flag for update check to report new LCD FW version
 bool debugSerialD8Enabled = true;                   // Enable hardware serial debug output on pin D8
 const uint32_t telnetInputMax = 128;                // Size of user input buffer for user telnet session
 uint8_t motionPin = 0;                              // GPIO input pin for motion sensor if connected and enabled
 bool motionActive = false;                          // Motion is being detected
 const uint32_t motionLatchTimeout = MOTION_LATCH_TIMEOUT;          // Latch time for motion sensor
 const uint32_t motionBufferTimeout = MOTION_BUFFER_TIMEOUT;        // Latch time for motion sensor
-uint32_t updateLcdAvailableVersion;                                // Int to hold the new LCD FW version number
 const uint32_t connectTimeout = CONNECTION_TIMEOUT;       // Timeout for WiFi and MQTT connection attempts in seconds
 const uint32_t reConnectTimeout = RECONNECT_TIMEOUT;      // Timeout for WiFi reconnection attempts in seconds
-uint8_t espMac[6];                                        // Byte array to store our MAC address
+
+const uint32_t updateCheckInterval = UPDATE_CHECK_INTERVAL; // Time in msec between update checks (12 hours)
 uint32_t updateCheckTimer = 0;                      // Timer for update check
 
 WiFiClient wifiClient;                     // client for OTA?
 WiFiServer telnetServer(23);               // Server listening for Telnet
 WiFiClient telnetClient;
 MDNSResponder::hMDNSService hMDNSService;  // Bonjour
-
-// URL for auto-update "version.json"
-const char UPDATE_URL[] = DEFAULT_URL_UPDATE;
-// Default link to compiled Arduino firmware image
-String espFirmwareUrl = DEFAULT_URL_ARDUINO_FW;
-// Default link to compiled Nextion firmware images
-String lcdFirmwareUrl = DEFAULT_URL_LCD_FW;
-
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////

@@ -20,7 +20,7 @@
 // so EspClass and espClass collide with existing classes. So we need something more unique
 // let us prefix "our", because that is oh-so original.
 
-class ourEspClass 
+class ourEspClass
 {
 private:
 public:
