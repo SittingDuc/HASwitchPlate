@@ -49,6 +49,9 @@
 // that connection will just fail. Note, brackets matter this time
 #define UPDATE_CHECK_ENABLE (true)  // if true, check The Internet for new versions
 
+// by default, on power on read config.json from the spiffs
+#define DISABLE_CONFIG_READ (false)  // if true, do not read config.json from spiffs
+
 // URL for auto-update "version.json"
 #define DEFAULT_URL_UPDATE ("http://haswitchplate.com/update/version.json")
 // Default link to compiled Arduino firmware image
@@ -65,6 +68,9 @@
 #define MQTT_MAX_PACKET_SIZE (4096)             // Size of buffer for incoming MQTT message
 #define MQTT_STATUS_UPDATE_INTERVAL (5*AMINUTE) // Time in msec between publishing MQTT status updates (5 minutes)
 
+#define MDNS_ENABLED (true)               // mDNS enabled
+
+#define MOTION_ENABLED (false)            // Motion sensor is enabled
 #define MOTION_LATCH_TIMEOUT (30*ASECOND) // Latch time for motion sensor
 #define MOTION_BUFFER_TIMEOUT (1*ASECOND) // Latch time for motion sensor
 

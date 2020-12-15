@@ -6,9 +6,11 @@
 // little changes Copyright (C) 2020 Gerard Sharp (find me on GitHub)
 //
 //
-// config_class.h : A class and support works to support our configuration controls
+// config_class.h : A class and support works to support our configuration controls and JSON file on a SPIFFS Partition
 //
 // ----------------------------------------------------------------------------------------------------------------- //
+
+// NB: after ESPCore 2.6.3, SPIFFS is deprecated in favour of LittleFS
 
 // This file is only #included once, mmkay
 #pragma once
@@ -27,7 +29,7 @@ public:
   // constructor
   ConfigClass(void)
   {
-    _alive = false;
+    _alive = true;
     setWIFISSID(DEFAULT_WIFI_SSID);
     setWIFIPass(DEFAULT_WIFI_PASS);
 
@@ -42,6 +44,10 @@ public:
     setHaspNode(DEFAULT_HASP_NODE);
     setGroupName(DEFAULT_GROUP_NAME);
     setMotionPin(DEFAULT_MOTION_PIN);
+    setMDSNEnabled(MDNS_ENABLED);
+    setMotionEnabled(MOTION_ENABLED);
+
+    _shouldSaveConfig = false;                       // Flag to save json config to SPIFFS
   }
 
 
@@ -55,6 +61,22 @@ public:
   ////////////////////////////////////////////////////////////////////////////////////////////////////
   void loop();
 
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+  void readFile();
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+  void saveCallback();
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+  void saveFileIfNeeded();
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+  void saveFile();
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+  void clearFileSystem();
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
   // we are going to have quite a count of getters and setters
   // can we streamline them?
 
@@ -82,8 +104,17 @@ public:
   char *getGroupName(void) { return _groupName; }
   void setGroupName(const char *value) { strncpy(_groupName, value, 16); _groupName[15]='\0'; }
 
+  bool getMotionEnabled(void) { return _motionEnabled; }
+  void setMotionEnabled(bool value) { _motionEnabled=value; }
+
   char *getMotionPin(void) { return _motionPin; }
   void setMotionPin(const char *value) { strncpy(_motionPin, value, 3); _motionPin[2]='\0'; }
+
+  bool getMDNSEnabled(void) { return _mdnsEnabled; }
+  void setMDSNEnabled(bool value) { _mdnsEnabled=value; }
+
+  bool getSaveNeeded(void) { return _shouldSaveConfig; }
+  void setSaveNeeded(void) { _shouldSaveConfig=true; }
 
   float getHaspVersion(void) { return _haspVersion; }
 
@@ -106,6 +137,9 @@ protected:
   char _haspNode[16];
   char _groupName[16];
   char _motionPin[3];
+  bool _motionEnabled;                     // Motion sensor is enabled
+  bool _mdnsEnabled;                       // mDNS is enabled
+  bool _shouldSaveConfig;                  // Flag to save json config to SPIFFS
 
   const float _haspVersion = HASP_VERSION; // Current HASP software release version
 

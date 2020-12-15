@@ -10,33 +10,9 @@
 //
 // ----------------------------------------------------------------------------------------------------------------- //
 
-#include "hmi_nextion.h"
-#include <Arduino.h>
+#include "common.h"
 #include <ArduinoJson.h>
 #include <ESP8266httpUpdate.h>
-
-#include "debug.h"
-extern debugClass debug; // our debug Object, USB Serial and/or Telnet
-
-#include "config_class.h"
-extern ConfigClass config; // our Configuration Container
-
-#include "mqtt_class.h"
-extern MQTTClass mqtt;   // our MQTT Object
-
-#include "web_class.h"
-extern WebClass web; // our HTTP Object
-
-#include "speaker_class.h"
-extern SpeakerClass beep; // our Speaker Object
-
-
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// TODO: Class These!
-extern String getSubtringField(String data, char separator, int index); // TODO: class me
-extern String printHex8(String data, uint8_t length); // TODO: class me
-extern bool updateCheck();
-extern void espReset();
 
 // Is this ours or webClass'?
 uint32_t tftFileSize = 0;                           // Filesize for TFT firmware upload
@@ -99,7 +75,7 @@ void hmiNextionClass::loop(void)
   }
   else if ((_lcdVersion > 0) && (millis() <= (_retryMax * CheckInterval)) && !_startupCompleteFlag)
   { // We have LCD info, so trigger an update check + report
-    if (updateCheck())
+    if (esp.updateCheck())
     { // Send a status update if the update check worked
       mqtt.statusUpdate();
       _startupCompleteFlag = true;
@@ -107,7 +83,7 @@ void hmiNextionClass::loop(void)
   }
   else if ((millis() > (_retryMax * CheckInterval)) && !_startupCompleteFlag)
   { // We still don't have LCD info so go ahead and run the rest of the checks once at startup anyway
-    updateCheck();
+    esp.updateCheck();
     mqtt.statusUpdate();
     _startupCompleteFlag = true;
   }
@@ -496,7 +472,7 @@ void hmiNextionClass::startOtaDownload(String otaUrl)
       else
       {
         debug.printLn(F("LCD OTA: LCD upload command FAILED.  Restarting device."));
-        espReset();
+        esp.reset();
       }
       debug.printLn(F("LCD OTA: Starting update"));
       lcdOtaTimer = millis();
@@ -540,7 +516,7 @@ void hmiNextionClass::startOtaDownload(String otaUrl)
               debug.printLn(String(F("LCD OTA: Part ")) + String(lcdOtaPartNum) + String(F(" FAILED, ")) + String(lcdOtaPercentComplete) + String(F("% complete")));
               debug.printLn(F("LCD OTA: failure"));
               delay(2000); // extra delay while the LCD does its thing
-              espReset();
+              esp.reset();
             }
           }
           else
@@ -556,7 +532,7 @@ void hmiNextionClass::startOtaDownload(String otaUrl)
         if ((lcdOtaTimer > 0) && ((millis() - lcdOtaTimer) > lcdOtaTimeout))
         { // Our timer expired so reset
           debug.printLn(F("LCD OTA: ERROR: LCD upload timeout.  Restarting."));
-          espReset();
+          esp.reset();
         }
       }
       lcdOtaPartNum++;
@@ -570,19 +546,19 @@ void hmiNextionClass::startOtaDownload(String otaUrl)
           web.loop();
           delay(1);
         }
-        espReset();
+        esp.reset();
       }
       else
       {
         debug.printLn(F("LCD OTA: Failure"));
-        espReset();
+        esp.reset();
       }
     }
   }
   else
   {
     debug.printLn(String(F("LCD OTA: HTTP GET failed, error code ")) + lcdOtaHttp.errorToString(lcdOtaHttpReturn));
-    espReset();
+    esp.reset();
   }
   lcdOtaHttp.end();
 }
@@ -833,8 +809,8 @@ void hmiNextionClass::_appendCmd(int page, String cmd)
     return;
   }
 
-  String object=getSubtringField(cmd,'=',0);
-  String value=getSubtringField(cmd,'=',1);
+  String object=esp.getSubtringField(cmd,'=',0);
+  String value=esp.getSubtringField(cmd,'=',1);
 
   int objectOffset = 0;
   char buffer[_cacheBufferSize];

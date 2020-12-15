@@ -11,27 +11,9 @@
 // ----------------------------------------------------------------------------------------------------------------- //
 
 
-#include "settings.h"
-#include <Arduino.h>
+#include "common.h"
 #include <MQTT.h>
 #include <ArduinoOTA.h>
-#include "mqtt_class.h"
-
-#include "debug.h"
-extern debugClass debug; // our serial debug interface
-
-#include "config_class.h"
-extern ConfigClass config; // our Configuration Container
-
-#include "hmi_nextion.h" // circular?
-extern hmiNextionClass nextion;  // our LCD Object
-
-#include "web_class.h"
-extern WebClass web; // our HTTP Object
-
-#include "speaker_class.h"
-extern SpeakerClass beep; // our Speaker Object
-
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // TODO: Class These!
@@ -41,15 +23,6 @@ extern String espFirmwareUrl;                      // Default link to compiled A
 extern bool updateEspAvailable;                    // Flag for update check to report new ESP FW version
 extern bool updateLcdAvailable;                    // Flag for update check to report new LCD FW version
 
-// TODO: Class These!
-extern String getSubtringField(String data, char separator, int index); // TODO: class me
-extern String printHex8(String data, uint8_t length); // TODO: class me
-extern bool updateCheck();
-extern void espReset();
-extern void espStartOta(String espOtaUrl);
-extern void configClearSaved();
-
-
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Our internal objects
 // TODO: can these go into our class?
@@ -57,13 +30,12 @@ extern void configClearSaved();
 WiFiClient wifiMQTTClient;                 // client for MQTT
 MQTTClient mqttClient(mqttMaxPacketSize);  // MQTT Object
 
-extern MQTTClass mqtt;
-
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // callback prototype is "typedef void (*MQTTClientCallbackSimple)(String &topic, String &payload)"
 // So we cannot declare our callback within the class, as it gets the wrong prototype
 // So we have our callback outside the class and then have it call into the (global) class
 // to do the actual work of parsing the mqtt message
+// and yes, we need a local copy of "self" to handle our callbacks.
 void mqtt_callback(String &strTopic, String &strPayload)
 {
   mqtt.callback(strTopic, strPayload);
@@ -216,7 +188,7 @@ void MQTTClass::connect()
       if (mqttReconnectCount > ((mqttConnectTimeout / 10) - 1))
       {
         debug.printLn(String(F("MQTT connection attempt ")) + String(mqttReconnectCount) + String(F(" failed with rc ")) + String(mqttClient.returnCode()) + String(F(".  Restarting device.")));
-        espReset();
+        esp.reset();
       }
       debug.printLn(String(F("MQTT connection attempt ")) + String(mqttReconnectCount) + String(F(" failed with rc ")) + String(mqttClient.returnCode()) + String(F(".  Trying again in 30 seconds.")));
       nextion.setAttr("p[0].b[1].txt", "\"WiFi Connected:\\r " + String(WiFi.SSID()) + "\\rIP: " + WiFi.localIP().toString() + "\\r\\rMQTT Connect to:\\r " + String(config.getMQTTServer()) + "\\rFAILED rc=" + String(mqttClient.returnCode()) + "\\r\\rRetry in 30 sec\"");
@@ -315,17 +287,17 @@ void MQTTClass::callback(String &strTopic, String &strPayload)
   { // '[...]/device/command/espupdate' -m 'http://192.168.0.10/local/HASwitchPlate.ino.d1_mini.bin' == espStartOta("http://192.168.0.10/local/HASwitchPlate.ino.d1_mini.bin")
     if (strPayload == "")
     {
-      espStartOta(espFirmwareUrl);
+      esp.startOta(espFirmwareUrl);
     }
     else
     {
-      espStartOta(strPayload);
+      esp.startOta(strPayload);
     }
   }
   else if (strTopic == (_commandTopic + "/reboot") || strTopic == (_groupCommandTopic + "/reboot"))
   { // '[...]/device/command/reboot' == reboot microcontroller)
     debug.printLn(F("MQTT: Rebooting device"));
-    espReset();
+    esp.reset();
   }
   else if (strTopic == (_commandTopic + "/lcdreboot") || strTopic == (_groupCommandTopic + "/lcdreboot"))
   { // '[...]/device/command/lcdreboot' == reboot LCD panel)
@@ -334,13 +306,13 @@ void MQTTClass::callback(String &strTopic, String &strPayload)
   }
   else if (strTopic == (_commandTopic + "/factoryreset") || strTopic == (_groupCommandTopic + "/factoryreset"))
   { // '[...]/device/command/factoryreset' == clear all saved settings)
-    configClearSaved();
+    config.clearFileSystem();
   }
   else if (strTopic == (_commandTopic + "/beep") || strTopic == (_groupCommandTopic + "/beep"))
   { // '[...]/device/command/beep')
-    String mqqtvar1 = getSubtringField(strPayload, ',', 0);
-    String mqqtvar2 = getSubtringField(strPayload, ',', 1);
-    String mqqtvar3 = getSubtringField(strPayload, ',', 2);
+    String mqqtvar1 = esp.getSubtringField(strPayload, ',', 0);
+    String mqqtvar2 = esp.getSubtringField(strPayload, ',', 1);
+    String mqqtvar3 = esp.getSubtringField(strPayload, ',', 2);
     beep.playSound(mqqtvar1.toInt(), mqqtvar2.toInt(), mqqtvar3.toInt());
   }
   else if (strTopic.startsWith(_commandTopic) && (strPayload == ""))

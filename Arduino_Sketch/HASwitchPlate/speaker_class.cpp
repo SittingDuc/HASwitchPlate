@@ -11,12 +11,7 @@
 // ----------------------------------------------------------------------------------------------------------------- //
 
 
-#include "settings.h"
-#include <Arduino.h>
-#include "speaker_class.h"
-
-#include "debug.h"
-extern debugClass debug; // our serial debug interface
+#include "common.h"
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void SpeakerClass::begin()

@@ -11,27 +11,10 @@
 // ----------------------------------------------------------------------------------------------------------------- //
 
 
-#include "settings.h"
-#include <Arduino.h>
+#include "common.h"
 #include <ESP8266WebServer.h>
 #include <ESP8266HTTPUpdateServer.h> // ESP8266HTTPUpdateServer, httpOTAUpdate
 #include <WiFiManager.h> // HTTP_HEADER, HTTP_END, etc
-#include "web_class.h"
-
-#include "debug.h"
-extern debugClass debug; // our serial debug interface
-
-#include "config_class.h"
-extern ConfigClass config; // our Configuration Container
-
-#include "hmi_nextion.h"
-extern hmiNextionClass nextion;  // our LCD Object
-
-#include "mqtt_class.h"
-extern MQTTClass mqtt; // our MQTT Object
-
-#include "speaker_class.h"
-extern SpeakerClass beep; // our Speaker Object
 
 
 extern uint8_t espMac[6];                          // Byte array to store our MAC address
@@ -42,17 +25,8 @@ extern float updateEspAvailableVersion;            // Float to hold the new ESP 
 extern bool updateLcdAvailable;                    // Flag for update check to report new LCD FW version
 extern bool shouldSaveConfig;                      // Flag to save json config to SPIFFS
 extern uint8_t motionPin;                          // GPIO input pin for motion sensor if connected and enabled
-extern bool mdnsEnabled;                           // mDNS enabled
 extern uint32_t updateLcdAvailableVersion;         // Int to hold the new LCD FW version number
-extern uint32_t tftFileSize;                           // Filesize for TFT firmware upload
-
-extern void espReset();
-extern void configRead();
-extern void configSave();
-extern void configClearSaved();
-extern void espStartOta(String espOtaUrl);
-extern void espWifiSetup();
-
+extern uint32_t tftFileSize;                       // Filesize for TFT firmware upload
 
 
 ESP8266WebServer webServer(80);            // Server listening for HTTP
@@ -69,8 +43,8 @@ extern WebClass web;
 // callback prototype is "std::function<void ()> handler"
 // So we cannot declare our callback within the class, as it gets the wrong prototype
 // So we have our callback outside the class and then have it call into the (global) class
-// to do the actual work of parsing the mqtt message
-
+// to do the actual work of parsing the http message
+// and yes, we need a local copy of "self" to handle our callbacks.
 void callback_HandleNotFound()
 {
     web._handleNotFound();
@@ -267,7 +241,7 @@ void WebClass::_handleRoot()
     httpMessage += String(F(" checked='checked'"));
   }
   httpMessage += String(F("><br/><b>mDNS enabled:</b><input id='mdnsEnabled' name='mdnsEnabled' type='checkbox'"));
-  if (mdnsEnabled)
+  if (config.getMDNSEnabled())
   {
     httpMessage += String(F(" checked='checked'"));
   }
@@ -345,7 +319,7 @@ void WebClass::_handleSaveConfig()
   // Check required values
   if (webServer.arg("wifiSSID") != "" && webServer.arg("wifiSSID") != String(WiFi.SSID()))
   { // Handle WiFi update
-    shouldSaveConfig = true;
+    config.setSaveNeeded();
     shouldSaveWifi = true;
     webServer.arg("wifiSSID").toCharArray(config.getWIFISSID(), 32);
     if (webServer.arg("wifiPass") != String("********"))
@@ -355,94 +329,94 @@ void WebClass::_handleSaveConfig()
   }
   if (webServer.arg("mqttServer") != "" && webServer.arg("mqttServer") != String(config.getMQTTServer()))
   { // Handle mqttServer
-    shouldSaveConfig = true;
+    config.setSaveNeeded();
     webServer.arg("mqttServer").toCharArray(config.getMQTTServer(), 64);
   }
   if (webServer.arg("mqttPort") != "" && webServer.arg("mqttPort") != String(config.getMQTTPort()))
   { // Handle mqttPort
-    shouldSaveConfig = true;
+    config.setSaveNeeded();
     webServer.arg("mqttPort").toCharArray(config.getMQTTPort(), 6);
   }
   if (webServer.arg("haspNode") != "" && webServer.arg("haspNode") != String(config.getHaspNode()))
   { // Handle haspNode
-    shouldSaveConfig = true;
+    config.setSaveNeeded();
     String lowerHaspNode = webServer.arg("haspNode");
     lowerHaspNode.toLowerCase();
     lowerHaspNode.toCharArray(config.getHaspNode(), 16);
   }
   if (webServer.arg("groupName") != "" && webServer.arg("groupName") != String(config.getGroupName()))
   { // Handle groupName
-    shouldSaveConfig = true;
+    config.setSaveNeeded();
     webServer.arg("groupName").toCharArray(config.getGroupName(), 16);
   }
   // Check optional values
   if (webServer.arg("mqttUser") != String(config.getMQTTUser()))
   { // Handle mqttUser
-    shouldSaveConfig = true;
+    config.setSaveNeeded();
     webServer.arg("mqttUser").toCharArray(config.getMQTTUser(), 32);
   }
   if (webServer.arg("mqttPassword") != String("********"))
   { // Handle mqttPassword
-    shouldSaveConfig = true;
+    config.setSaveNeeded();
     webServer.arg("mqttPassword").toCharArray(config.getMQTTPassword(), 32);
   }
   if (webServer.arg("configUser") != String(_configUser))
   { // Handle configUser
-    shouldSaveConfig = true;
+    config.setSaveNeeded();
     webServer.arg("configUser").toCharArray(_configUser, 32);
   }
   if (webServer.arg("configPassword") != String("********"))
   { // Handle configPassword
-    shouldSaveConfig = true;
+    config.setSaveNeeded();
     webServer.arg("configPassword").toCharArray(_configPassword, 32);
   }
   if (webServer.arg("motionPinConfig") != String(config.getMotionPin()))
   { // Handle motionPinConfig
-    shouldSaveConfig = true;
+    config.setSaveNeeded();
     webServer.arg("motionPinConfig").toCharArray(config.getMotionPin(), 3);
   }
   if ((webServer.arg("debugSerialEnabled") == String("on")) && !debug.getSerialEnabled())
   { // debugSerialEnabled was disabled but should now be enabled
-    shouldSaveConfig = true;
+    config.setSaveNeeded();
     debug.enableSerial(true);
   }
   else if ((webServer.arg("debugSerialEnabled") == String("")) && debug.getSerialEnabled())
   { // debugSerialEnabled was enabled but should now be disabled
-    shouldSaveConfig = true;
+    config.setSaveNeeded();
     debug.enableSerial(false);
   }
   if ((webServer.arg("debugTelnetEnabled") == String("on")) && !debug.getTelnetEnabled())
   { // debugTelnetEnabled was disabled but should now be enabled
-    shouldSaveConfig = true;
+    config.setSaveNeeded();
     debug.enableTelnet(true);
   }
   else if ((webServer.arg("debugTelnetEnabled") == String("")) && debug.getTelnetEnabled())
   { // debugTelnetEnabled was enabled but should now be disabled
-    shouldSaveConfig = true;
+    config.setSaveNeeded();
     debug.enableTelnet(false);
   }
-  if ((webServer.arg("mdnsEnabled") == String("on")) && !mdnsEnabled)
+  if ((webServer.arg("mdnsEnabled") == String("on")) && !config.getMDNSEnabled())
   { // mdnsEnabled was disabled but should now be enabled
-    shouldSaveConfig = true;
-    mdnsEnabled = true;
+    config.setSaveNeeded();
+    config.setMDSNEnabled(true);
   }
-  else if ((webServer.arg("mdnsEnabled") == String("")) && mdnsEnabled)
+  else if ((webServer.arg("mdnsEnabled") == String("")) && config.getMDNSEnabled())
   { // mdnsEnabled was enabled but should now be disabled
-    shouldSaveConfig = true;
-    mdnsEnabled = false;
+    config.setSaveNeeded();
+    config.setMDSNEnabled(false);
   }
   if ((webServer.arg("beepEnabled") == String("on")) && !beep.getEnable())
   { // beepEnabled was disabled but should now be enabled
-    shouldSaveConfig = true;
+    config.setSaveNeeded();
     beep.enable(true);
   }
   else if ((webServer.arg("beepEnabled") == String("")) && beep.getEnable())
   { // beepEnabled was enabled but should now be disabled
-    shouldSaveConfig = true;
+    config.setSaveNeeded();
     beep.enable(true);
   }
 
-  if (shouldSaveConfig)
+  if (config.getSaveNeeded())
   { // Config updated, notify user and trigger write to SPIFFS
     httpMessage += String(F("<meta http-equiv='refresh' content='15;url=/' />"));
     httpMessage += FPSTR(HTTP_HEADER_END);
@@ -451,13 +425,13 @@ void WebClass::_handleSaveConfig()
     httpMessage += FPSTR(HTTP_END);
     webServer.send(200, "text/html", httpMessage);
 
-    configSave();
+    config.saveFile();
     if (shouldSaveWifi)
     {
       debug.printLn(String(F("CONFIG: Attempting connection to SSID: ")) + webServer.arg("wifiSSID"));
-      espWifiSetup();
+      esp.wiFiSetup();
     }
-    espReset();
+    esp.reset();
   }
   else
   { // No change found, notify user and link back to config page
@@ -491,7 +465,7 @@ void WebClass::_handleResetConfig()
     httpMessage += FPSTR(HTTP_END);
     webServer.send(200, "text/html", httpMessage);
     delay(1000);
-    configClearSaved();
+    config.clearFileSystem();
   }
   else
   {
@@ -610,7 +584,7 @@ void WebClass::_handleEspFirmware()
   webServer.send(200, "text/html", httpMessage);
 
   debug.printLn("ESPFW: Attempting ESP firmware update from: " + String(webServer.arg("espFirmware")));
-  espStartOta(webServer.arg("espFirmware"));
+  esp.startOta(webServer.arg("espFirmware"));
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -646,7 +620,7 @@ void WebClass::_handleLcdUpload()
   else if ((lcdOtaTimer > 0) && ((millis() - lcdOtaTimer) > lcdOtaTimeout))
   { // Our timer expired so reset
     debug.printLn(F("LCD OTA: ERROR: LCD upload timeout.  Restarting."));
-    espReset();
+    esp.reset();
   }
   else if (upload.status == UPLOAD_FILE_START)
   {
@@ -677,7 +651,7 @@ void WebClass::_handleLcdUpload()
     else
     {
       debug.printLn(F("LCD OTA: LCD upload command FAILED."));
-      espReset();
+      esp.reset();
     }
     lcdOtaTimer = millis();
   }
@@ -759,7 +733,7 @@ void WebClass::_handleLcdUpload()
           webServer.handleClient();
           delay(1);
         }
-        espReset();
+        esp.reset();
       }
       else
       {
@@ -772,7 +746,7 @@ void WebClass::_handleLcdUpload()
           webServer.handleClient();
           delay(1);
         }
-        espReset();
+        esp.reset();
       }
     }
     lcdOtaTimer = millis();
@@ -792,7 +766,7 @@ void WebClass::_handleLcdUpload()
           webServer.handleClient();
           delay(1);
         }
-        espReset();
+        esp.reset();
       }
       else
       {
@@ -805,7 +779,7 @@ void WebClass::_handleLcdUpload()
           webServer.handleClient();
           delay(1);
         }
-        espReset();
+        esp.reset();
       }
     }
   }
@@ -821,7 +795,7 @@ void WebClass::_handleLcdUpload()
       webServer.handleClient();
       delay(1);
     }
-    espReset();
+    esp.reset();
   }
   else
   { // Something went weird, we should never get here...
@@ -835,7 +809,7 @@ void WebClass::_handleLcdUpload()
       webServer.handleClient();
       delay(1);
     }
-    espReset();
+    esp.reset();
   }
 }
 
@@ -934,5 +908,5 @@ void WebClass::_handleReboot()
   debug.printLn(F("RESET: Rebooting device"));
   nextion.sendCmd("page 0");
   nextion.setAttr("p[0].b[1].txt", "\"Rebooting...\"");
-  espReset();
+  esp.reset();
 }
