@@ -1153,7 +1153,7 @@ bool hmiNextionClass::_helperTxtMalloc(uint8_t page, uint8_t button, const char 
   uint8_t newLen = strlen(newText);
   if( newLen < 8 )
   {
-  _cached[page][button].txtlen = 8;
+    _cached[page][button].txtlen = 8;
   }
   else if( newLen < 250 )
   {

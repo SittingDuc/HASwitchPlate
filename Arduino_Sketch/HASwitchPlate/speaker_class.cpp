@@ -82,10 +82,10 @@ void SpeakerClass::enable(bool newState)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void SpeakerClass::playSound(uint32_t onTime, uint32_t offTime, uint32_t count)
 { // play a given count of beeps with given onTime and given offTime
-    if( !_beepEnabled || onTime == 0 || offTime == 0 || count == 0 )
-    { // do nothing
-        return;
-    }
+  if( !_beepEnabled || onTime == 0 || offTime == 0 || count == 0 )
+  { // do nothing
+    return;
+  }
 
   _beepOnTime = onTime;
   _beepOffTime = offTime;

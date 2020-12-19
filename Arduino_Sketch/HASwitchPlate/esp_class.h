@@ -57,6 +57,23 @@ public:
   bool updateCheck();
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////
+  void motionSetup();
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+  void motionUpdate();
+
+  String getMacHex(void);
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+  uint8_t getMotionPin(void) { return _motionPin; }
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+  const char *getWiFiConfigPass(void) { return _wifiConfigPass; }
+  
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
+  const char *getWiFiConfigAP(void) { return _wifiConfigAP; }
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
   // Original source: https://arduino.stackexchange.com/a/1237
   String getSubtringField(String data, char separator, int index);
 
@@ -65,5 +82,14 @@ public:
 
 protected:
   bool _alive;
+  const char *_wifiConfigPass = WIFI_CONFIG_PASSWORD;           // First-time config WPA2 password
+  const char *_wifiConfigAP = WIFI_CONFIG_AP;                   // First-time config SSID
+  const uint32_t _motionLatchTimeout = MOTION_LATCH_TIMEOUT;    // Latch time for motion sensor
+  const uint32_t _motionBufferTimeout = MOTION_BUFFER_TIMEOUT;  // Latch time for motion sensor
+  const uint32_t _connectTimeout = CONNECTION_TIMEOUT;          // Timeout for WiFi and MQTT connection attempts in seconds
+  const uint32_t _reConnectTimeout = RECONNECT_TIMEOUT;         // Timeout for WiFi reconnection attempts in seconds
+  uint8_t _espMac[6];                                           // Byte array to store our MAC address
+  uint8_t _motionPin = 0;                                       // GPIO input pin for motion sensor if connected and enabled
+  bool _motionActive = false;                                   // Motion is being detected
 
 };

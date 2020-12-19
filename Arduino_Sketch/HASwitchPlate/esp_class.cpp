@@ -17,39 +17,28 @@
 
 
 // TODO: Class These!
-extern const char wifiConfigPass[9] = WIFI_CONFIG_PASSWORD; // First-time config WPA2 password
-extern const char wifiConfigAP[14] = WIFI_CONFIG_AP;        // First-time config SSID
-extern const uint32_t connectTimeout = CONNECTION_TIMEOUT;       // Timeout for WiFi and MQTT connection attempts in seconds
-extern const uint32_t reConnectTimeout = RECONNECT_TIMEOUT;      // Timeout for WiFi reconnection attempts in seconds
-uint8_t espMac[6];                                        // Byte array to store our MAC address
-
 bool updateEspAvailable = false;                    // Flag for update check to report new ESP FW version
 float updateEspAvailableVersion;                    // Float to hold the new ESP FW version number
 bool updateLcdAvailable = false;                    // Flag for update check to report new LCD FW version
 uint32_t updateLcdAvailableVersion;                 // Int to hold the new LCD FW version number
+const char UPDATE_URL[] = DEFAULT_URL_UPDATE;       // URL for auto-update "version.json"
+String espFirmwareUrl = DEFAULT_URL_ARDUINO_FW;     // Default link to compiled Arduino firmware image
+String lcdFirmwareUrl = DEFAULT_URL_LCD_FW;         // Default link to compiled Nextion firmware images
 
-// URL for auto-update "version.json"
-const char UPDATE_URL[] = DEFAULT_URL_UPDATE;
-// Default link to compiled Arduino firmware image
-String espFirmwareUrl = DEFAULT_URL_ARDUINO_FW;
-// Default link to compiled Nextion firmware images
-String lcdFirmwareUrl = DEFAULT_URL_LCD_FW;
-
-
-
-// is this one local or remote?
-extern WiFiClient wifiClient;                     // client for OTA?
+WiFiClient wifiClient;                              // client for OTA
 
 // a reference to our global copy of self, so we can make working callbacks
 extern ourEspClass esp;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Function implementing callback cannot itself be a class member
 static void configSaveCallback()
 { // Callback notifying our config class of the need to save config
   config.saveCallback();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Function implementing callback cannot itself be a class member
 static void configWiFiCallback(WiFiManager *myWiFiManager)
 { // Notify the user that we're entering config mode
   debug.printLn(WIFI,F("WIFI: Failed to connect to assigned AP, entering config mode"));
@@ -59,21 +48,25 @@ static void configWiFiCallback(WiFiManager *myWiFiManager)
   }
   nextion.sendCmd("page 0");
   nextion.setAttr("p[0].b[1].font", "6");
-  nextion.setAttr("p[0].b[1].txt", "\" HASP WiFi Setup\\r AP: " + String(wifiConfigAP) + "\\rPassword: " + String(wifiConfigPass) + "\\r\\r\\r\\r\\r\\r\\r  http://192.168.4.1\"");
+  nextion.setAttr("p[0].b[1].txt", "\" HASP WiFi Setup\\r AP: " + String(esp.getWiFiConfigAP()) + "\\rPassword: " + String(esp.getWiFiConfigPass()) + "\\r\\r\\r\\r\\r\\r\\r  http://192.168.4.1\"");
   nextion.sendCmd("vis 3,1");
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static void resetCallback()
 { // callback to reset the micro
-    esp.reset();
+  esp.reset();
 }
+// end callbacks
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void ourEspClass::begin()
 { // called in the main code setup, handles our initialisation
   wiFiSetup(); // Start up networking
+
+  motionSetup(); // If the motion-sensor pin is enabled, set it up now
+
   // in the original setup() routine, there were other calls here
   // so we have bought setupOTA forward in time...
   setupOta(); // Start OTA firmware update
@@ -81,6 +74,7 @@ void ourEspClass::begin()
 
 void ourEspClass::loop()
 { // called in the main code loop, handles our periodic code
+
   while ((WiFi.status() != WL_CONNECTED) || (WiFi.localIP().toString() == "0.0.0.0"))
   { // Check WiFi is connected and that we have a valid IP, retry until we do.
     if (WiFi.status() == WL_CONNECTED)
@@ -88,6 +82,11 @@ void ourEspClass::loop()
       WiFi.disconnect();
     }
     wiFiReconnect();
+  }
+
+  if (config.getMotionEnabled())
+  { // Check on our motion sensor
+    motionUpdate();
   }
 
 }
@@ -109,10 +108,10 @@ void ourEspClass::wiFiSetup()
   nextion.setAttr("p[0].b[1].font", "6");
   nextion.setAttr("p[0].b[1].txt", "\"WiFi Connecting...\\r " + String(WiFi.SSID()) + "\"");
 
-  WiFi.macAddress(espMac);            // Read our MAC address and save it to espMac
-  WiFi.hostname(config.getHaspNode());            // Assign our hostname before connecting to WiFi
-  WiFi.setAutoReconnect(true);        // Tell WiFi to autoreconnect if connection has dropped
-  WiFi.setSleepMode(WIFI_NONE_SLEEP); // Disable WiFi sleep modes to prevent occasional disconnects
+  WiFi.macAddress(_espMac);             // Read our MAC address and save it to espMac
+  WiFi.hostname(config.getHaspNode());  // Assign our hostname before connecting to WiFi
+  WiFi.setAutoReconnect(true);          // Tell WiFi to autoreconnect if connection has dropped
+  WiFi.setSleepMode(WIFI_NONE_SLEEP);   // Disable WiFi sleep modes to prevent occasional disconnects
 
   if (String(config.getWIFISSID()) == "")
   { // If the sketch has not defined a static wifiSSID use WiFiManager to collect required information from the user.
@@ -146,14 +145,14 @@ void ourEspClass::wiFiSetup()
     wifiManager.addParameter(&custom_configPassword);
 
     // Timeout config portal after connectTimeout seconds, useful if configured wifi network was temporarily unavailable
-    wifiManager.setTimeout(connectTimeout);
+    wifiManager.setTimeout(_connectTimeout);
 
     wifiManager.setAPCallback(configWiFiCallback);
 
     // Fetches SSID and pass from EEPROM and tries to connect
     // If it does not connect it starts an access point with the specified name
     // and goes into a blocking loop awaiting configuration.
-    if (!wifiManager.autoConnect(wifiConfigAP, wifiConfigPass))
+    if (!wifiManager.autoConnect(_wifiConfigAP, _wifiConfigPass))
     { // Reset and try again
       debug.printLn(WIFI,F("WIFI: Failed to connect and hit timeout"));
       reset();
@@ -181,7 +180,7 @@ void ourEspClass::wiFiSetup()
     while (WiFi.status() != WL_CONNECTED)
     {
       delay(500);
-      if (millis() >= (wifiReconnectTimer + (connectTimeout * ASECOND)))
+      if (millis() >= (wifiReconnectTimer + (_connectTimeout * ASECOND)))
       { // If we've been trying to reconnect for connectTimeout seconds, reboot and try again
         debug.printLn(WIFI,F("WIFI: Failed to connect and hit timeout"));
         reset();
@@ -210,7 +209,7 @@ void ourEspClass::wiFiReconnect()
   while (WiFi.status() != WL_CONNECTED)
   {
     delay(500);
-    if (millis() >= (wifiReconnectTimer + (reConnectTimeout * ASECOND)))
+    if (millis() >= (wifiReconnectTimer + (_reConnectTimeout * ASECOND)))
     { // If we've been trying to reconnect for reConnectTimeout seconds, reboot and try again
       debug.printLn(WIFI,F("WIFI: Failed to reconnect and hit timeout"));
       reset();
@@ -305,15 +304,15 @@ bool ourEspClass::updateCheck()
 
   if (httpCode > 0)
   { // httpCode will be negative on error
-  if (httpCode == HTTP_CODE_OK)
-  { // file found at server
-  updatePayload = updateClient.getString();
-  }
+    if (httpCode == HTTP_CODE_OK)
+    { // file found at server
+      updatePayload = updateClient.getString();
+    }
   }
   else
   {
-  debug.printLn(String(F("UPDATE: Update check failed: ")) + updateClient.errorToString(httpCode));
-  return false;
+    debug.printLn(String(F("UPDATE: Update check failed: ")) + updateClient.errorToString(httpCode));
+    return false;
   }
   updateClient.end();
 
@@ -322,39 +321,101 @@ bool ourEspClass::updateCheck()
 
   if (jsonError)
   { // Couldn't parse the returned JSON, so bail
-  debug.printLn(String(F("UPDATE: JSON parsing failed: ")) + String(jsonError.c_str()));
-  return false;
+    debug.printLn(String(F("UPDATE: JSON parsing failed: ")) + String(jsonError.c_str()));
+    return false;
   }
   else
   {
-  if (!updateJson["d1_mini"]["version"].isNull())
-  {
-  updateEspAvailableVersion = updateJson["d1_mini"]["version"].as<float>();
-  debug.printLn(String(F("UPDATE: updateEspAvailableVersion: ")) + String(updateEspAvailableVersion));
-  espFirmwareUrl = updateJson["d1_mini"]["firmware"].as<String>();
-  if (updateEspAvailableVersion > config.getHaspVersion())
-  {
-  updateEspAvailable = true;
-  debug.printLn(String(F("UPDATE: New ESP version available: ")) + String(updateEspAvailableVersion));
-  }
-  }
-  if (nextion.getModel() && !updateJson[nextion.getModel()]["version"].isNull())
-  {
-  updateLcdAvailableVersion = updateJson[nextion.getModel()]["version"].as<int>();
-  debug.printLn(String(F("UPDATE: updateLcdAvailableVersion: ")) + String(updateLcdAvailableVersion));
-  lcdFirmwareUrl = updateJson[nextion.getModel()]["firmware"].as<String>();
-  if (updateLcdAvailableVersion > nextion.getLCDVersion())
-  {
-  updateLcdAvailable = true;
-  debug.printLn(String(F("UPDATE: New LCD version available: ")) + String(updateLcdAvailableVersion));
-  }
-  }
-  debug.printLn(F("UPDATE: Update check completed"));
+    if (!updateJson["d1_mini"]["version"].isNull())
+    {
+      updateEspAvailableVersion = updateJson["d1_mini"]["version"].as<float>();
+      debug.printLn(String(F("UPDATE: updateEspAvailableVersion: ")) + String(updateEspAvailableVersion));
+      espFirmwareUrl = updateJson["d1_mini"]["firmware"].as<String>();
+      if (updateEspAvailableVersion > config.getHaspVersion())
+      {
+        updateEspAvailable = true;
+        debug.printLn(String(F("UPDATE: New ESP version available: ")) + String(updateEspAvailableVersion));
+      }
+    }
+    if (nextion.getModel() && !updateJson[nextion.getModel()]["version"].isNull())
+    {
+      updateLcdAvailableVersion = updateJson[nextion.getModel()]["version"].as<int>();
+      debug.printLn(String(F("UPDATE: updateLcdAvailableVersion: ")) + String(updateLcdAvailableVersion));
+      lcdFirmwareUrl = updateJson[nextion.getModel()]["firmware"].as<String>();
+      if (updateLcdAvailableVersion > nextion.getLCDVersion())
+      {
+        updateLcdAvailable = true;
+        debug.printLn(String(F("UPDATE: New LCD version available: ")) + String(updateLcdAvailableVersion));
+      }
+    }
+    debug.printLn(F("UPDATE: Update check completed"));
   }
 #endif
   return true;
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void ourEspClass::motionSetup()
+{ // Set up the motion sensor pin and code
+  if (strcmp(config.getMotionPin(), "D0") == 0)
+  {
+    config.setMotionEnabled(true);
+    _motionPin = D0;
+    pinMode(_motionPin, INPUT);
+  }
+  else if (strcmp(config.getMotionPin(), "D1") == 0)
+  {
+    config.setMotionEnabled(true);
+    _motionPin = D1;
+    pinMode(_motionPin, INPUT);
+  }
+  else if (strcmp(config.getMotionPin(), "D2") == 0)
+  {
+    config.setMotionEnabled(true);
+    _motionPin = D2;
+    pinMode(_motionPin, INPUT);
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void ourEspClass::motionUpdate()
+{ // track the motion sensor pin and code
+  static uint32_t motionLatchTimer = 0;         // Timer for motion sensor latch
+  static uint32_t motionBufferTimer = millis(); // Timer for motion sensor buffer
+  static bool motionActiveBuffer = _motionActive;
+  bool motionRead = digitalRead(_motionPin);
+
+  if (motionRead != motionActiveBuffer)
+  { // if we've changed state
+    motionBufferTimer = millis();
+    motionActiveBuffer = motionRead;
+  }
+  else if (millis() > (motionBufferTimer + _motionBufferTimeout))
+  {
+    if ((motionActiveBuffer && !_motionActive) && (millis() > (motionLatchTimer + _motionLatchTimeout)))
+    {
+      motionLatchTimer = millis();
+      mqtt.publishMotionTopic(String(F("ON")));
+      _motionActive = motionActiveBuffer;
+      debug.printLn("MOTION: Active");
+    }
+    else if ((!motionActiveBuffer && _motionActive) && (millis() > (motionLatchTimer + _motionLatchTimeout)))
+    {
+      motionLatchTimer = millis();
+      mqtt.publishMotionTopic(String(F("OFF")));
+
+      _motionActive = motionActiveBuffer;
+      debug.printLn("MOTION: Inactive");
+    }
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+String ourEspClass::getMacHex(void)
+{ // return our Ethernet MAC Address as 6 hex bytes, 12 characters : "99AABBCCDDEE"
+  return String(_espMac[0], HEX) + String(_espMac[1], HEX) + String(_espMac[2], HEX) + String(_espMac[3], HEX) + String(_espMac[4], HEX) + String(_espMac[5], HEX);
+  // we could also implement getMacColons to return "99:AA:BB:CC:DD:EE" ?
+}
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Submitted by benmprojects to handle "beep" commands. Split

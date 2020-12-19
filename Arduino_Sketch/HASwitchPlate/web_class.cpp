@@ -15,25 +15,23 @@
 #include <ESP8266WebServer.h>
 #include <ESP8266HTTPUpdateServer.h> // ESP8266HTTPUpdateServer, httpOTAUpdate
 #include <WiFiManager.h> // HTTP_HEADER, HTTP_END, etc
+#include <ESP8266mDNS.h> // MDNSResponder
 
-
-extern uint8_t espMac[6];                          // Byte array to store our MAC address
 extern String lcdFirmwareUrl;                      // Default link to compiled Nextion firmware images
 extern String espFirmwareUrl;                      // Default link to compiled Arduino firmware image
 extern bool updateEspAvailable;                    // Flag for update check to report new ESP FW version
 extern float updateEspAvailableVersion;            // Float to hold the new ESP FW version number
 extern bool updateLcdAvailable;                    // Flag for update check to report new LCD FW version
 extern bool shouldSaveConfig;                      // Flag to save json config to SPIFFS
-extern uint8_t motionPin;                          // GPIO input pin for motion sensor if connected and enabled
 extern uint32_t updateLcdAvailableVersion;         // Int to hold the new LCD FW version number
 extern uint32_t tftFileSize;                       // Filesize for TFT firmware upload
-
+const uint32_t telnetInputMax = 128;               // Size of user input buffer for user telnet session
 
 ESP8266WebServer webServer(80);            // Server listening for HTTP
 ESP8266HTTPUpdateServer httpOTAUpdate;
-
-extern String espFirmwareUrl;
-extern String lcdFirmwareUrl;
+WiFiServer telnetServer(23);               // Server listening for Telnet
+WiFiClient telnetClient;
+MDNSResponder::hMDNSService hMDNSService;  // Bonjour
 
 
 // a reference to our global copy of self, so we can make working callbacks
@@ -47,19 +45,19 @@ extern WebClass web;
 // and yes, we need a local copy of "self" to handle our callbacks.
 void callback_HandleNotFound()
 {
-    web._handleNotFound();
+  web._handleNotFound();
 }
 void callback_HandleRoot()
 {
-    web._handleRoot();
+  web._handleRoot();
 }
 void callback_HandleSaveConfig()
 {
-    web._handleSaveConfig();
+  web._handleSaveConfig();
 }
 void callback_HandleResetConfig()
 {
-    web._handleResetConfig();
+  web._handleResetConfig();
 }
 void callback_HandleResetBacklight()
 {
@@ -95,8 +93,9 @@ void callback_HandleTftFileSize()
 }
 void callback_HandleReboot()
 {
-    web._handleReboot();
+  web._handleReboot();
 }
+// end callbacks
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -107,6 +106,44 @@ void WebClass::begin()
   setUser(DEFAULT_CONFIG_USER);
   setPassword(DEFAULT_CONFIG_PASS);
 
+  _setupHTTP();
+
+  if (config.getMDNSEnabled())
+  { // Setup mDNS service discovery if enabled
+    _setupMDNS();
+  }
+
+  if (debug.getTelnetEnabled())
+  { // Setup telnet server for remote debug output
+    _setupTelnet();
+  }
+
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void WebClass::loop()
+{ // called in the main code loop, handles our periodic code
+  if( !_alive )
+  {
+    begin();
+  }
+  webServer.handleClient(); // webServer loop
+
+  if (config.getMDNSEnabled())
+  {
+    MDNS.update();
+  }
+
+  if (debug.getTelnetEnabled())
+  {
+    _handleTelnetClient(); // telnetClient loop
+  }
+
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void WebClass::_setupHTTP()
+{
   if ((_configPassword[0] != '\0') && (_configUser[0] != '\0'))
   { // Start the webserver with our assigned password if it's been configured...
     httpOTAUpdate.setup(&webServer, "/update", _configUser, _configPassword);
@@ -134,13 +171,76 @@ void WebClass::begin()
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void WebClass::loop()
-{ // called in the main code loop, handles our periodic code
-  if( !_alive )
+void WebClass::_setupMDNS()
+{
+  hMDNSService = MDNS.addService(config.getHaspNode(), "http", "tcp", 80);
+  if (debug.getTelnetEnabled())
   {
-    begin();
+    MDNS.addService(config.getHaspNode(), "telnet", "tcp", 23);
   }
-  webServer.handleClient(); // webServer loop
+  MDNS.addServiceTxt(hMDNSService, "app_name", "HASwitchPlate");
+  MDNS.addServiceTxt(hMDNSService, "app_version", String(config.getHaspVersion()).c_str());
+  MDNS.update();
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void WebClass::_setupTelnet()
+{
+  telnetServer.setNoDelay(true);
+  telnetServer.begin();
+  debug.printLn(String(F("TELNET: debug server enabled at telnet:")) + WiFi.localIP().toString());
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void WebClass::_handleTelnetClient()
+{ // Basic telnet client handling code from: https://gist.github.com/tablatronix/4793677ca748f5f584c95ec4a2b10303
+  static uint32_t telnetInputIndex = 0;
+  if (telnetServer.hasClient())
+  { // client is connected
+    if (!telnetClient || !telnetClient.connected())
+    {
+      if (telnetClient)
+      {
+        telnetClient.stop(); // client disconnected
+      }
+      telnetClient = telnetServer.available(); // ready for new client
+      telnetInputIndex = 0;                    // reset input buffer index
+    }
+    else
+    {
+      telnetServer.available().stop(); // have client, block new connections
+    }
+  }
+  // Handle client input from telnet connection.
+  if (telnetClient && telnetClient.connected() && telnetClient.available())
+  { // client input processing
+    static char telnetInputBuffer[telnetInputMax];
+
+    if (telnetClient.available())
+    {
+      char telnetInputByte = telnetClient.read(); // Read client byte
+      // debug.printLn(String("telnet in: 0x") + String(telnetInputByte, HEX));
+      if (telnetInputByte == 5)
+      { // If the telnet client sent a bunch of control commands on connection (which end in ENQUIRY/0x05), ignore them and restart the buffer
+        telnetInputIndex = 0;
+      }
+      else if (telnetInputByte == 13)
+      { // telnet line endings should be CRLF: https://tools.ietf.org/html/rfc5198#appendix-C
+        // If we get a CR just ignore it
+      }
+      else if (telnetInputByte == 10)
+      {                                          // We've caught a LF (DEC 10), send buffer contents to the Nextion
+        telnetInputBuffer[telnetInputIndex] = 0; // null terminate our char array
+        nextion.sendCmd(String(telnetInputBuffer));
+        telnetInputIndex = 0;
+      }
+      else if (telnetInputIndex < telnetInputMax)
+      { // If we have room left in our buffer add the current byte
+        telnetInputBuffer[telnetInputIndex] = telnetInputByte;
+        telnetInputIndex++;
+      }
+    }
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -214,17 +314,17 @@ void WebClass::_handleRoot()
   }
   httpMessage += String(F("'><br/><hr><b>Motion Sensor Pin:&nbsp;</b><select id='motionPinConfig' name='motionPinConfig'>"));
   httpMessage += String(F("<option value='0'"));
-  if (!motionPin)
+  if (!esp.getMotionPin())
   {
     httpMessage += String(F(" selected"));
   }
   httpMessage += String(F(">disabled/not installed</option><option value='D0'"));
-  if (motionPin == D0)
+  if (esp.getMotionPin() == D0)
   {
     httpMessage += String(F(" selected"));
   }
   httpMessage += String(F(">D0</option><option value='D1'"));
-  if (motionPin == D1)
+  if (esp.getMotionPin() == D1)
   {
     httpMessage += String(F(" selected"));
   }

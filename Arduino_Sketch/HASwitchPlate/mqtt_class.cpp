@@ -17,7 +17,6 @@
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // TODO: Class These!
-extern uint8_t espMac[6];                          // Byte array to store our MAC address
 extern String lcdFirmwareUrl;                      // Default link to compiled Nextion firmware images
 extern String espFirmwareUrl;                      // Default link to compiled Arduino firmware image
 extern bool updateEspAvailable;                    // Flag for update check to report new ESP FW version
@@ -30,6 +29,7 @@ extern bool updateLcdAvailable;                    // Flag for update check to r
 WiFiClient wifiMQTTClient;                 // client for MQTT
 MQTTClient mqttClient(mqttMaxPacketSize);  // MQTT Object
 
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // callback prototype is "typedef void (*MQTTClientCallbackSimple)(String &topic, String &payload)"
 // So we cannot declare our callback within the class, as it gets the wrong prototype
@@ -40,6 +40,8 @@ void mqtt_callback(String &strTopic, String &strPayload)
 {
   mqtt.callback(strTopic, strPayload);
 }
+// end callbacks
+
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void MQTTClass::begin()
@@ -122,7 +124,7 @@ void MQTTClass::connect()
     static uint8_t mqttReconnectCount = 0;
 
     // Generate an MQTT client ID as haspNode + our MAC address
-    _clientId = String(config.getHaspNode()) + "-" + String(espMac[0], HEX) + String(espMac[1], HEX) + String(espMac[2], HEX) + String(espMac[3], HEX) + String(espMac[4], HEX) + String(espMac[5], HEX);
+    _clientId = String(config.getHaspNode()) + "-" + esp.getMacHex();
     nextion.sendCmd("page 0");
     nextion.setAttr("p[0].b[1].font", "6");
     nextion.setAttr("p[0].b[1].txt", "\"WiFi Connected!\\r " + String(WiFi.SSID()) + "\\rIP: " + WiFi.localIP().toString() + "\\r\\rMQTT Connecting:\\r " + String(config.getMQTTServer()) + "\"");
