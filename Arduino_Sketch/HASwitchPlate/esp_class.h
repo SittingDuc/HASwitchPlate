@@ -88,8 +88,10 @@ protected:
   const uint32_t _motionBufferTimeout = MOTION_BUFFER_TIMEOUT;  // Latch time for motion sensor
   const uint32_t _connectTimeout      = CONNECTION_TIMEOUT;     // Timeout for WiFi and MQTT connection attempts in seconds
   const uint32_t _reConnectTimeout    = RECONNECT_TIMEOUT;      // Timeout for WiFi reconnection attempts in seconds
-  uint8_t _espMac[6];                                           // Byte array to store our MAC address
-  uint8_t _motionPin = 0;                                       // GPIO input pin for motion sensor if connected and enabled
-  bool _motionActive = false;                                   // Motion is being detected
+  const uint32_t _updateCheckInterval = UPDATE_CHECK_INTERVAL;  // Time in msec between update checks (12 hours)
+  uint32_t _updateCheckTimer;                                   // Timer for update check
+  uint8_t  _espMac[6];                                          // Byte array to store our MAC address
+  uint8_t  _motionPin;                                          // GPIO input pin for motion sensor if connected and enabled
+  bool     _motionActive;                                       // Motion is being detected
 
 };

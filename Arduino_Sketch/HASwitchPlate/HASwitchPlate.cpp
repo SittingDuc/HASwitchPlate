@@ -7,6 +7,7 @@
 // https://github.com/aderusha/HASwitchPlate
 //
 // Copyright (c) 2019 Allen Derusha allen@derusha.org
+// little changes Copyright (C) 2020 Gerard Sharp (find me on GitHub)
 //
 // MIT License
 //
@@ -36,18 +37,15 @@
 #include <WiFiManager.h>
 
 
-// Settings (initial values) now live in a separate file
-// So we do not leave secrets here and upload to github accidentally
-
-// TODO: Move some/all of these into the config class!
-
-const uint32_t updateCheckInterval = UPDATE_CHECK_INTERVAL; // Time in msec between update checks (12 hours)
-uint32_t updateCheckTimer = 0;                      // Timer for update check
-
-
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void setup()
 { // System setup
+
+  // Power on the LCD if needed, establish Serial ports for debug and the LCD,
+  // load our configuration settings and use those to establish a WiFi link,
+  // use that WiFi link to start network servers and clients
+  // and finally motion sensor (now in esp class) and speaker, if fitted
+
   nextion.initResetPin();
   Serial.begin(115200);  // Serial - LCD RX (after swap), debug TX
   Serial1.begin(115200); // Serial1 - LCD TX, no RX
@@ -76,21 +74,18 @@ void setup()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void loop()
 { // Main execution loop
+
+  // Periodic update is required for several things to work
+  // some functions in particular do not appreciate use of delay() and require that loop() comes back periodically
+  // * Encryption: HTTPS, MQTTS
+  // * ArduinoOTA
+  // * MQTT Last-Will-and-Testament
+
   nextion.loop();
   esp.loop();
   mqtt.loop();
   ArduinoOTA.handle();      // Arduino OTA loop
   web.loop();
-
-  if ((millis() - updateCheckTimer) >= updateCheckInterval)
-  { // Run periodic update check
-    updateCheckTimer = millis();
-    if (esp.updateCheck())
-    { // Send a status update if the update check worked
-      mqtt.statusUpdate();
-    }
-  }
-
   beep.loop();
 }
 

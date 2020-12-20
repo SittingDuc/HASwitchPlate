@@ -17,7 +17,7 @@
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Our internal objects
-// TODO: can these go into our class?
+// TODO: can these go into our class? (not if their constructor has arguments!)
 
 // Because the mqttClient object is defined outside the class, then the constant it uses must also be outside the class.
 static const uint16_t _mqttMaxPacketSize    = MQTT_MAX_PACKET_SIZE;         // Size of buffer for incoming MQTT message

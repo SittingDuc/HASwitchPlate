@@ -233,6 +233,24 @@ void WebClass::_handleTelnetClient()
   }
 }
 
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void WebClass::telnetPrintLn(bool enabled, String message)
+{
+  if (enabled && telnetClient.connected())
+  {
+    telnetClient.println(message);
+  }
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void WebClass::telnetPrint(bool enabled, String message)
+{
+  if (enabled && telnetClient.connected())
+  {
+    telnetClient.print(message);
+  }
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool WebClass::_authenticated(void)
 { // common code to verify our authentication on most handle callbacks

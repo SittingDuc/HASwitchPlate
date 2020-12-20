@@ -57,10 +57,18 @@ static void resetCallback()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void ourEspClass::begin()
 { // called in the main code setup, handles our initialisation
+  // give internal variables initial values
+  _motionPin = 0;
+  _motionActive = false;
+  _updateCheckTimer = 0;
+
+#if UPDATE_CHECK_ENABLE==(false)
+  config.setEspAvailable(false, HASP_VERSION);
+  config.setLcdAvailable(false, 0);
+#endif
+
   wiFiSetup(); // Start up networking
-
   motionSetup(); // If the motion-sensor pin is enabled, set it up now
-
   // in the original setup() routine, there were other calls here
   // so we have bought setupOTA forward in time...
   setupOta(); // Start OTA firmware update
@@ -70,6 +78,8 @@ void ourEspClass::loop()
 { // called in the main code loop, handles our periodic code
   while ((WiFi.status() != WL_CONNECTED) || (WiFi.localIP().toString() == "0.0.0.0"))
   { // Check WiFi is connected and that we have a valid IP, retry until we do.
+    // NB: tight-looping here breaks code that depends on running periodically, like MQTT clients and ArduinoOTA
+    // of course, we have no IP address, so those features are already broken, so this (infinite) loop does not hurt us
     if (WiFi.status() == WL_CONNECTED)
     { // If we're currently connected, disconnect so we can try again
       WiFi.disconnect();
@@ -81,6 +91,17 @@ void ourEspClass::loop()
   { // Check on our motion sensor
     motionUpdate();
   }
+
+  // check internet for update (if enabled) and report about it over MQTT
+  if ((millis() - _updateCheckTimer) >= _updateCheckInterval)
+  { // Run periodic update check
+    _updateCheckTimer = millis();
+    if (esp.updateCheck())
+    { // Send a status update if the update check worked
+      mqtt.statusUpdate();
+    }
+  }
+
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -287,6 +308,7 @@ bool ourEspClass::updateCheck()
 #if UPDATE_CHECK_ENABLE==(false)
   config.setEspAvailable(false, HASP_VERSION);
   config.setLcdAvailable(false, 0);
+  return true;
 #else
   HTTPClient updateClient;
   debug.printLn(String(F("UPDATE: Checking update URL: ")) + String(UPDATE_URL));
@@ -351,8 +373,8 @@ bool ourEspClass::updateCheck()
     }
     debug.printLn(F("UPDATE: Update check completed"));
   }
-#endif
   return true;
+#endif
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////

@@ -24,7 +24,7 @@
 #include "settings.h"
 #include <Arduino.h>
 
-#include "debug.h"
+#include "debug_class.h"
 COMMON_EXTERN debugClass debug;  // our debug Object, USB Serial and/or Telnet
 
 #include "esp_class.h"
