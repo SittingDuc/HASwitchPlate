@@ -16,18 +16,14 @@
 #include <ArduinoOTA.h>
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// TODO: Class These!
-extern String lcdFirmwareUrl;                      // Default link to compiled Nextion firmware images
-extern String espFirmwareUrl;                      // Default link to compiled Arduino firmware image
-extern bool updateEspAvailable;                    // Flag for update check to report new ESP FW version
-extern bool updateLcdAvailable;                    // Flag for update check to report new LCD FW version
-
-////////////////////////////////////////////////////////////////////////////////////////////////////
 // Our internal objects
 // TODO: can these go into our class?
 
+// Because the mqttClient object is defined outside the class, then the constant it uses must also be outside the class.
+static const uint16_t _mqttMaxPacketSize    = MQTT_MAX_PACKET_SIZE;         // Size of buffer for incoming MQTT message
+
 WiFiClient wifiMQTTClient;                 // client for MQTT
-MQTTClient mqttClient(mqttMaxPacketSize);  // MQTT Object
+MQTTClient mqttClient(_mqttMaxPacketSize);  // MQTT Object
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -67,11 +63,10 @@ void MQTTClass::loop()
   }
 
   mqttClient.loop();        // MQTT client loop
-  if ((millis() - _statusUpdateTimer) >= statusUpdateInterval)
+  if ((millis() - _statusUpdateTimer) >= _statusUpdateInterval)
   { // Run periodic status update
     statusUpdate();
   }
-
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -187,7 +182,7 @@ void MQTTClass::connect()
     else
     { // Retry until we give up and restart after mqttConnectTimeout seconds
       mqttReconnectCount++;
-      if (mqttReconnectCount > ((mqttConnectTimeout / 10) - 1))
+      if (mqttReconnectCount > ((_mqttConnectTimeout / 10) - 1))
       {
         debug.printLn(String(F("MQTT connection attempt ")) + String(mqttReconnectCount) + String(F(" failed with rc ")) + String(mqttClient.returnCode()) + String(F(".  Restarting device.")));
         esp.reset();
@@ -278,7 +273,7 @@ void MQTTClass::callback(String &strTopic, String &strPayload)
   { // '[...]/device/command/lcdupdate' -m 'http://192.168.0.10/local/HASwitchPlate.tft' == nextion.startOtaDownload("http://192.168.0.10/local/HASwitchPlate.tft")
     if (strPayload == "")
     {
-      nextion.startOtaDownload(lcdFirmwareUrl);
+      nextion.startOtaDownload(config.getLcdFirmwareUrl());
     }
     else
     {
@@ -289,7 +284,7 @@ void MQTTClass::callback(String &strTopic, String &strPayload)
   { // '[...]/device/command/espupdate' -m 'http://192.168.0.10/local/HASwitchPlate.ino.d1_mini.bin' == espStartOta("http://192.168.0.10/local/HASwitchPlate.ino.d1_mini.bin")
     if (strPayload == "")
     {
-      esp.startOta(espFirmwareUrl);
+      esp.startOta(config.getEspFirmwareUrl());
     }
     else
     {
@@ -370,7 +365,7 @@ void MQTTClass::statusUpdate()
   String statusPayload = "{";
   statusPayload += String(F("\"status\":\"available\","));
   statusPayload += String(F("\"espVersion\":")) + String(config.getHaspVersion()) + String(F(","));
-  if (updateEspAvailable)
+  if (config.isEspUpdateAvailable())
   {
     statusPayload += String(F("\"updateEspAvailable\":true,"));
   }
@@ -387,7 +382,7 @@ void MQTTClass::statusUpdate()
     statusPayload += String(F("\"lcdConnected\":false,"));
   }
   statusPayload += String(F("\"lcdVersion\":\"")) + String(nextion.getLCDVersion()) + String(F("\","));
-  if (updateLcdAvailable)
+  if (config.isLcdUpdateAvailable())
   {
     statusPayload += String(F("\"updateLcdAvailable\":true,"));
   }
@@ -457,6 +452,13 @@ void MQTTClass::publishStateSubTopic(String subtopic, String newState)
   String mqttReturnTopic = _stateTopic + subtopic;
   mqttClient.publish(mqttReturnTopic, newState);
   debug.printLn(MQTT,String(F("MQTT OUT: '")) + mqttReturnTopic + "' : '" + newState + "]");
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+uint16_t MQTTClass::getMaxPacketSize(void)
+{ // return the (non-class) variable for our network buffer. See note at the top of mqtt_class.cpp
+  return _mqttMaxPacketSize;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////

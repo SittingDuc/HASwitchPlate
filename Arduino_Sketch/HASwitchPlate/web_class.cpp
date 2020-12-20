@@ -17,15 +17,7 @@
 #include <WiFiManager.h> // HTTP_HEADER, HTTP_END, etc
 #include <ESP8266mDNS.h> // MDNSResponder
 
-extern String lcdFirmwareUrl;                      // Default link to compiled Nextion firmware images
-extern String espFirmwareUrl;                      // Default link to compiled Arduino firmware image
-extern bool updateEspAvailable;                    // Flag for update check to report new ESP FW version
-extern float updateEspAvailableVersion;            // Float to hold the new ESP FW version number
-extern bool updateLcdAvailable;                    // Flag for update check to report new LCD FW version
-extern bool shouldSaveConfig;                      // Flag to save json config to SPIFFS
-extern uint32_t updateLcdAvailableVersion;         // Int to hold the new LCD FW version number
-extern uint32_t tftFileSize;                       // Filesize for TFT firmware upload
-const uint32_t telnetInputMax = 128;               // Size of user input buffer for user telnet session
+static const uint32_t telnetInputMax = 128;               // Size of user input buffer for user telnet session
 
 ESP8266WebServer webServer(80);            // Server listening for HTTP
 ESP8266HTTPUpdateServer httpOTAUpdate;
@@ -105,6 +97,7 @@ void WebClass::begin()
 
   setUser(DEFAULT_CONFIG_USER);
   setPassword(DEFAULT_CONFIG_PASS);
+  _tftFileSize=0;
 
   _setupHTTP();
 
@@ -117,7 +110,6 @@ void WebClass::begin()
   { // Setup telnet server for remote debug output
     _setupTelnet();
   }
-
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -138,7 +130,6 @@ void WebClass::loop()
   {
     _handleTelnetClient(); // telnetClient loop
   }
-
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -167,7 +158,6 @@ void WebClass::_setupHTTP()
   webServer.onNotFound(callback_HandleNotFound);
   webServer.begin();
   debug.printLn(String(F("HTTP: Server started @ http://")) + WiFi.localIP().toString());
-
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -354,12 +344,12 @@ void WebClass::_handleRoot()
 
   httpMessage += String(F("><br/><hr><button type='submit'>save settings</button></form>"));
 
-  if (updateEspAvailable)
+  if (config.isEspUpdateAvailable())
   {
     httpMessage += String(F("<br/><hr><font color='green'><center><h3>HASP Update available!</h3></center></font>"));
     httpMessage += String(F("<form method='get' action='espfirmware'>"));
-    httpMessage += String(F("<input id='espFirmwareURL' type='hidden' name='espFirmware' value='")) + espFirmwareUrl + "'>";
-    httpMessage += String(F("<button type='submit'>update HASP to v")) + String(updateEspAvailableVersion) + String(F("</button></form>"));
+    httpMessage += String(F("<input id='espFirmwareURL' type='hidden' name='espFirmware' value='")) + config.getEspFirmwareUrl() + "'>";
+    httpMessage += String(F("<button type='submit'>update HASP to v")) + String(config.getEspAvailableVersion()) + String(F("</button></form>"));
   }
 
   httpMessage += String(F("<hr><form method='get' action='firmware'>"));
@@ -618,12 +608,12 @@ void WebClass::_handleFirmware()
   // HTTPS Disabled pending resolution of issue: https://github.com/esp8266/Arduino/issues/4696
   // Until then, using a proxy host at http://haswitchplate.com to deliver unsecured firmware images from GitHub
   httpMessage += String(F("<form method='get' action='/espfirmware'>"));
-  if (updateEspAvailable)
+  if (config.isEspUpdateAvailable())
   {
     httpMessage += String(F("<font color='green'><b>HASP ESP8266 update available!</b></font>"));
   }
   httpMessage += String(F("<br/><b>Update ESP8266 from URL</b><small><i> http only</i></small>"));
-  httpMessage += String(F("<br/><input id='espFirmwareURL' name='espFirmware' value='")) + espFirmwareUrl + "'>";
+  httpMessage += String(F("<br/><input id='espFirmwareURL' name='espFirmware' value='")) + config.getEspFirmwareUrl() + "'>";
   httpMessage += String(F("<br/><br/><button type='submit'>Update ESP from URL</button></form>"));
 
   httpMessage += String(F("<br/><form method='POST' action='/update' enctype='multipart/form-data'>"));
@@ -635,12 +625,12 @@ void WebClass::_handleFirmware()
   httpMessage += String(F("After a power cycle, the LCD will display an error message until a successful firmware update has completed.<br/>"));
 
   httpMessage += String(F("<br/><hr><form method='get' action='lcddownload'>"));
-  if (updateLcdAvailable)
+  if (config.isLcdUpdateAvailable())
   {
     httpMessage += String(F("<font color='green'><b>HASP LCD update available!</b></font>"));
   }
   httpMessage += String(F("<br/><b>Update Nextion LCD from URL</b><small><i> http only</i></small>"));
-  httpMessage += String(F("<br/><input id='lcdFirmware' name='lcdFirmware' value='")) + lcdFirmwareUrl + "'>";
+  httpMessage += String(F("<br/><input id='lcdFirmware' name='lcdFirmware' value='")) + config.getLcdFirmwareUrl() + "'>";
   httpMessage += String(F("<br/><br/><button type='submit'>Update LCD from URL</button></form>"));
 
   httpMessage += String(F("<br/><form method='POST' action='/lcdupload' enctype='multipart/form-data'>"));
@@ -702,7 +692,7 @@ void WebClass::_handleLcdUpload()
 
   HTTPUpload &upload = webServer.upload();
 
-  if (tftFileSize == 0)
+  if (_tftFileSize == 0)
   {
     debug.printLn(String(F("LCD OTA: FAILED, no filesize sent.")));
     String httpMessage = FPSTR(HTTP_HEADER);
@@ -728,9 +718,9 @@ void WebClass::_handleLcdUpload()
 
     debug.printLn(String(F("LCD OTA: Attempting firmware upload")));
     debug.printLn(String(F("LCD OTA: upload.filename: ")) + String(upload.filename));
-    debug.printLn(String(F("LCD OTA: TFTfileSize: ")) + String(tftFileSize));
+    debug.printLn(String(F("LCD OTA: TFTfileSize: ")) + String(_tftFileSize));
 
-    lcdOtaRemaining = tftFileSize;
+    lcdOtaRemaining = _tftFileSize;
     lcdOtaParts = (lcdOtaRemaining / 4096) + 1;
     debug.printLn(String(F("LCD OTA: File upload beginning. Size ")) + String(lcdOtaRemaining) + String(F(" bytes in ")) + String(lcdOtaParts) + String(F(" 4k chunks.")));
 
@@ -738,7 +728,7 @@ void WebClass::_handleLcdUpload()
     Serial1.flush();
     nextion.handleInput();
 
-    String lcdOtaNextionCmd = "whmi-wri " + String(tftFileSize) + ",115200,0";
+    String lcdOtaNextionCmd = "whmi-wri " + String(_tftFileSize) + ",115200,0";
     debug.printLn(String(F("LCD OTA: Sending LCD upload command: ")) + lcdOtaNextionCmd);
     Serial1.print(lcdOtaNextionCmd);
     Serial1.write(nextion.Suffix, sizeof(nextion.Suffix));
@@ -795,7 +785,7 @@ void WebClass::_handleLcdUpload()
       {
         Serial1.flush();
         lcdOtaPartNum++;
-        lcdOtaPercentComplete = (lcdOtaTransferred * 100) / tftFileSize;
+        lcdOtaPercentComplete = (lcdOtaTransferred * 100) / _tftFileSize;
         lcdOtaChunkCounter = 0;
         if (nextion.otaResponse())
         {
@@ -820,11 +810,11 @@ void WebClass::_handleLcdUpload()
       }
     }
 
-    if (lcdOtaTransferred >= tftFileSize)
+    if (lcdOtaTransferred >= _tftFileSize)
     {
       if (nextion.otaResponse())
       {
-        debug.printLn(String(F("LCD OTA: Success, wrote ")) + String(lcdOtaTransferred) + " of " + String(tftFileSize) + " bytes.");
+        debug.printLn(String(F("LCD OTA: Success, wrote ")) + String(lcdOtaTransferred) + " of " + String(_tftFileSize) + " bytes.");
         webServer.sendHeader("Location", "/lcdOtaSuccess");
         webServer.send(303);
         uint32_t lcdOtaDelay = millis();
@@ -853,11 +843,11 @@ void WebClass::_handleLcdUpload()
   }
   else if (upload.status == UPLOAD_FILE_END)
   { // Upload completed
-    if (lcdOtaTransferred >= tftFileSize)
+    if (lcdOtaTransferred >= _tftFileSize)
     {
       if (nextion.otaResponse())
       { // YAY WE DID IT
-        debug.printLn(String(F("LCD OTA: Success, wrote ")) + String(lcdOtaTransferred) + " of " + String(tftFileSize) + " bytes.");
+        debug.printLn(String(F("LCD OTA: Success, wrote ")) + String(lcdOtaTransferred) + " of " + String(_tftFileSize) + " bytes.");
         webServer.sendHeader("Location", "/lcdOtaSuccess");
         webServer.send(303);
         uint32_t lcdOtaDelay = millis();
@@ -984,8 +974,8 @@ void WebClass::_handleTftFileSize()
   httpMessage += FPSTR(HTTP_HEADER_END);
   httpMessage += FPSTR(HTTP_END);
   webServer.send(200, "text/html", httpMessage);
-  tftFileSize = webServer.arg("tftFileSize").toInt();
-  debug.printLn(String(F("WEB: tftFileSize: ")) + String(tftFileSize));
+  _tftFileSize = webServer.arg("tftFileSize").toInt();
+  debug.printLn(String(F("WEB: tftFileSize: ")) + String(_tftFileSize));
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////

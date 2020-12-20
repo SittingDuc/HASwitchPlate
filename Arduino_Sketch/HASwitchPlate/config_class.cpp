@@ -145,6 +145,7 @@ void ConfigClass::saveFileIfNeeded()
     saveFile();
   }
 }
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void ConfigClass::saveFile()
 { // Save the custom parameters to config.json

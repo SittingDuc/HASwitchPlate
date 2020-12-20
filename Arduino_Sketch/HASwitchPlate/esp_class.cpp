@@ -17,13 +17,7 @@
 
 
 // TODO: Class These!
-bool updateEspAvailable = false;                    // Flag for update check to report new ESP FW version
-float updateEspAvailableVersion;                    // Float to hold the new ESP FW version number
-bool updateLcdAvailable = false;                    // Flag for update check to report new LCD FW version
-uint32_t updateLcdAvailableVersion;                 // Int to hold the new LCD FW version number
 const char UPDATE_URL[] = DEFAULT_URL_UPDATE;       // URL for auto-update "version.json"
-String espFirmwareUrl = DEFAULT_URL_ARDUINO_FW;     // Default link to compiled Arduino firmware image
-String lcdFirmwareUrl = DEFAULT_URL_LCD_FW;         // Default link to compiled Nextion firmware images
 
 WiFiClient wifiClient;                              // client for OTA
 
@@ -74,7 +68,6 @@ void ourEspClass::begin()
 
 void ourEspClass::loop()
 { // called in the main code loop, handles our periodic code
-
   while ((WiFi.status() != WL_CONNECTED) || (WiFi.localIP().toString() == "0.0.0.0"))
   { // Check WiFi is connected and that we have a valid IP, retry until we do.
     if (WiFi.status() == WL_CONNECTED)
@@ -88,7 +81,6 @@ void ourEspClass::loop()
   { // Check on our motion sensor
     motionUpdate();
   }
-
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -293,8 +285,8 @@ bool ourEspClass::updateCheck()
 { // firmware update check
   // Gerard has placed nodes on an isolated network. Connecting to the live internet is verboten and unpossible. So skip the pointless check
 #if UPDATE_CHECK_ENABLE==(false)
-  updateEspAvailable = false;
-  updateLcdAvailable = false;
+  config.setEspAvailable(false, HASP_VERSION);
+  config.setLcdAvailable(false, 0);
 #else
   HTTPClient updateClient;
   debug.printLn(String(F("UPDATE: Checking update URL: ")) + String(UPDATE_URL));
@@ -328,24 +320,33 @@ bool ourEspClass::updateCheck()
   {
     if (!updateJson["d1_mini"]["version"].isNull())
     {
-      updateEspAvailableVersion = updateJson["d1_mini"]["version"].as<float>();
-      debug.printLn(String(F("UPDATE: updateEspAvailableVersion: ")) + String(updateEspAvailableVersion));
-      espFirmwareUrl = updateJson["d1_mini"]["firmware"].as<String>();
-      if (updateEspAvailableVersion > config.getHaspVersion())
+      float newVersion = updateJson["d1_mini"]["version"].as<float>();
+      config.setEspFirmwareUrl(updateJson["d1_mini"]["firmware"].as<String>());
+      if( newVersion > config.getHaspVersion())
       {
-        updateEspAvailable = true;
-        debug.printLn(String(F("UPDATE: New ESP version available: ")) + String(updateEspAvailableVersion));
+        config.setEspAvailable(true, newVersion);
+        debug.printLn(String(F("UPDATE: New ESP version available: ")) + String(newVersion));
+      }
+      else
+      {
+        config.setEspAvailable(false, newVersion);
+        debug.printLn(String(F("UPDATE: updateEspAvailableVersion (not newer): ")) + String(newVersion));
       }
     }
     if (nextion.getModel() && !updateJson[nextion.getModel()]["version"].isNull())
     {
-      updateLcdAvailableVersion = updateJson[nextion.getModel()]["version"].as<int>();
-      debug.printLn(String(F("UPDATE: updateLcdAvailableVersion: ")) + String(updateLcdAvailableVersion));
-      lcdFirmwareUrl = updateJson[nextion.getModel()]["firmware"].as<String>();
-      if (updateLcdAvailableVersion > nextion.getLCDVersion())
+      uint32_t newVersion = updateJson[nextion.getModel()]["version"].as<int>();
+      config.setLcdFirmwareUrl(updateJson[nextion.getModel()]["firmware"].as<String>());
+      if( newVersion > nextion.getLCDVersion())
       {
-        updateLcdAvailable = true;
-        debug.printLn(String(F("UPDATE: New LCD version available: ")) + String(updateLcdAvailableVersion));
+        config.setLcdAvailable(true, newVersion);
+        debug.printLn(String(F("UPDATE: New LCD version available: ")) + String(newVersion));
+      }
+      else
+      {
+        config.setLcdAvailable(false, newVersion);
+        debug.printLn(String(F("UPDATE: updateLcdAvailableVersion (not newer): ")) + String(newVersion));
+
       }
     }
     debug.printLn(F("UPDATE: Update check completed"));

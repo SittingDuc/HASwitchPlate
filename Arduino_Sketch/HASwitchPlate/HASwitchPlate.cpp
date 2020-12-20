@@ -68,9 +68,7 @@ void setup()
 
   web.begin();
   mqtt.begin();
-
   beep.begin();
-
 
   debug.printLn(SYSTEM,F("SYSTEM: System init complete."));
 }
@@ -78,7 +76,6 @@ void setup()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void loop()
 { // Main execution loop
-
   nextion.loop();
   esp.loop();
   mqtt.loop();
@@ -94,9 +91,9 @@ void loop()
     }
   }
 
-
   beep.loop();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Functions
+// .. seem to have all moved into Classes. Neat.

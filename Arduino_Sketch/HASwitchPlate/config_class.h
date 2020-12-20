@@ -46,10 +46,11 @@ public:
     setMotionPin(DEFAULT_MOTION_PIN);
     setMDSNEnabled(MDNS_ENABLED);
     setMotionEnabled(MOTION_ENABLED);
+    setLcdFirmwareUrl(DEFAULT_URL_LCD_FW);
+    setEspFirmwareUrl(DEFAULT_URL_ARDUINO_FW);
 
     _shouldSaveConfig = false;                       // Flag to save json config to SPIFFS
   }
-
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////
   // destructor
@@ -78,7 +79,7 @@ public:
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////
   // we are going to have quite a count of getters and setters
-  // can we streamline them?
+  // can we streamline them? (basic C++ syntax says "no")
 
   char *getWIFISSID(void) { return _wifiSSID; }
   void setWIFISSID(const char *value) { strncpy(_wifiSSID, value, 32); _wifiSSID[31]='\0'; }
@@ -118,6 +119,20 @@ public:
 
   float getHaspVersion(void) { return _haspVersion; }
 
+  bool isEspUpdateAvailable(void) { return _updateEspAvailable; }
+  float getEspAvailableVersion(void) { return _updateEspAvailableVersion; }
+  void setEspAvailable(bool newAvailable, float newVersion) { _updateEspAvailable = newAvailable; _updateEspAvailableVersion = newVersion; }
+
+  bool isLcdUpdateAvailable(void) { return _updateLcdAvailable; }
+  uint32_t getLcdAvailableVersion(void) { return _updateLcdAvailableVersion; }
+  void setLcdAvailable(bool newAvailable, uint32_t newVersion) { _updateLcdAvailable = newAvailable; _updateLcdAvailableVersion = newVersion; }
+
+  String getEspFirmwareUrl(void) { return _espFirmwareUrl; }
+  void setEspFirmwareUrl(String newUrl) { _espFirmwareUrl = newUrl; }
+
+  String getLcdFirmwareUrl(void) { return _lcdFirmwareUrl; }
+  void setLcdFirmwareUrl(String newUrl) { _lcdFirmwareUrl = newUrl; }
+
 protected:
   bool     _alive;
 
@@ -142,5 +157,12 @@ protected:
   bool _shouldSaveConfig;                  // Flag to save json config to SPIFFS
 
   const float _haspVersion = HASP_VERSION; // Current HASP software release version
+
+  String   _espFirmwareUrl;                // Default link to compiled Arduino firmware image
+  bool     _updateEspAvailable;            // Flag for update check to report new ESP FW version
+  float    _updateEspAvailableVersion;     // Float to hold the new ESP FW version number
+  String   _lcdFirmwareUrl;                // Default link to compiled Nextion firmware images
+  bool     _updateLcdAvailable;            // Flag for update check to report new LCD FW version
+  uint32_t _updateLcdAvailableVersion;     // Int to hold the new LCD FW version number
 
 };

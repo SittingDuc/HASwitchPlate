@@ -14,9 +14,6 @@
 #include <ArduinoJson.h>
 #include <ESP8266httpUpdate.h>
 
-// Is this ours or webClass'?
-uint32_t tftFileSize = 0;                           // Filesize for TFT firmware upload
-
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void hmiNextionClass::begin(void)
 {  // called in the main code setup, handles our initialisation
@@ -87,7 +84,6 @@ void hmiNextionClass::loop(void)
     mqtt.statusUpdate();
     _startupCompleteFlag = true;
   }
-
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -122,7 +118,6 @@ void hmiNextionClass::reset()
     debug.printLn(F("ERROR: Rebooting LCD completed, but LCD is not responding."));
   }
   mqtt.publishStatusTopic("OFF");
-
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -199,7 +194,7 @@ void hmiNextionClass::parseJson(String &strPayload)
     strPayload.remove(strPayload.length() - 2, 2);
     strPayload.concat("]");
   }
-  DynamicJsonDocument commands(mqttMaxPacketSize + 1024);
+  DynamicJsonDocument commands(mqtt.getMaxPacketSize() + 1024);
   DeserializationError jsonError = deserializeJson(commands, strPayload);
   if (jsonError)
   { // Couldn't parse incoming JSON command
@@ -539,7 +534,7 @@ void hmiNextionClass::startOtaDownload(String otaUrl)
       lcdOtaTransferred += lcdOtaChunkCounter;
       if ((lcdOtaTransferred == lcdOtaFileSize) && otaResponse())
       {
-        debug.printLn(String(F("LCD OTA: Success, wrote ")) + String(lcdOtaTransferred) + " of " + String(tftFileSize) + " bytes.");
+        debug.printLn(String(F("LCD OTA: Success, wrote ")) + String(lcdOtaTransferred) + " of " + String(web.getTftFileSize()) + " bytes.");
         uint32_t lcdOtaDelay = millis();
         while ((millis() - lcdOtaDelay) < 5000)
         { // extra 5sec delay while the LCD handles any local firmware updates from new versions of code sent to it

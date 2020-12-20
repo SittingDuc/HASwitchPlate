@@ -16,10 +16,6 @@
 #include "settings.h"
 #include <Arduino.h>
 
-// Our internal constants
-static const uint32_t mqttConnectTimeout = CONNECTION_TIMEOUT;       // Timeout for WiFi and MQTT connection attempts in seconds
-const uint16_t mqttMaxPacketSize = MQTT_MAX_PACKET_SIZE;  // Size of buffer for incoming MQTT message
-//TODO: make other code use a class member instead of extern'ing this directly
 
 class MQTTClass {
 private:
@@ -62,19 +58,30 @@ public:
   ////////////////////////////////////////////////////////////////////////////////////////////////////
   void publishStateTopic(String msg);
 
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
   void publishButtonEvent(String page, String buttonID, String newState);
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
   void publishButtonJSONEvent(String page, String buttonID, String newState);
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
   void publishStatePage(String page);
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
   void publishStateSubTopic(String subtopic, String newState);
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////
   String getClientID(void);
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////
+  uint16_t getMaxPacketSize(void);
+
+  ////////////////////////////////////////////////////////////////////////////////////////////////////
   void goodbye();
 
 protected:
-  const uint32_t statusUpdateInterval = MQTT_STATUS_UPDATE_INTERVAL;  // Time in msec between publishing MQTT status updates (5 minutes)
+  const uint32_t _statusUpdateInterval = MQTT_STATUS_UPDATE_INTERVAL;  // Time in msec between publishing MQTT status updates (5 minutes)
+  const uint32_t _mqttConnectTimeout   = CONNECTION_TIMEOUT;           // Timeout for WiFi and MQTT connection attempts in seconds
 
   bool   _alive;                                   // Flag that data structures are initialised and functions can run without error
   String _clientId;                                // Auto-generated MQTT ClientID
